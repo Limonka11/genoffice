@@ -17,6 +17,7 @@
     "packages/*"
   ],
   "scripts": {
+    "build:web-host": "vite build --config web-full/vite.config.ts",
     "postinstall": "install-electron",
     "format": "node tools/format-changed.mjs --write",
     "format:check": "node tools/format-changed.mjs --check",

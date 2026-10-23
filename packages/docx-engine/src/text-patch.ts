@@ -203,3 +203,45 @@ function patchOneParagraph(paraXml: string, newText: string, skipLeading: boolea
   }
   return out
 }
+
+/**
+ * Vound fork: a paragraph that carries a complex field (w:fldChar, e.g. a legacy
+ * FORMTEXT with its w:ffData) or a content control (w:sdt) must not be rebuilt
+ * from the run model, because the model only holds the visible result text and
+ * the rebuild drops the field machinery. When the edit only changed text, patch
+ * the w:t inside the original paragraph XML instead: fields, controls, run
+ * properties and the paragraph properties stay byte for byte. A placeholder
+ * control that received real text loses its placeholder flag and style, as in
+ * Word. Returns null when the paragraph has no field or control, or when the
+ * text cannot be mapped (tabs, breaks, checkbox glyphs, formatting-only edits
+ * fall back to the regular rebuild).
+ */
+export function patchFieldParagraphText(
+  originalParaXml: string,
+  runs: ReadonlyArray<{ text: string }>,
+): string | null {
+  if (!/<w:fldChar\b|<w:sdt\b/.test(originalParaXml)) return null
+  const joined = runs.map((r) => r.text).join('')
+  if (/[\f\v\u001e]/.test(joined)) return null
+  // tabs and line breaks are their own elements, not w:t text: as long as the edit did
+  // not add or remove one, they stay where they are and the w:t mapping ignores them
+  const controls = (joined.match(/[\t\n]/g) ?? []).length
+  const originalControls = (originalParaXml.match(/<w:tab\s*\/>|<w:tab>\s*<\/w:tab>|<w:br\s*\/>|<w:cr\s*\/>/g) ?? []).length
+  if (controls !== originalControls) return null
+  const newText = joined.replace(/[\t\n]/g, '')
+  const patched = patchParagraphTexts(originalParaXml, newText)
+  if (patched === null) return null
+  if (patched === originalParaXml || !patched.includes('<w:showingPlcHdr')) return patched
+  // typed text replaced a placeholder: that control loses its placeholder flag and the
+  // placeholder character style, as in Word; controls whose text is unchanged keep both
+  const sdtRe = /<w:sdt>[\s\S]*?<\/w:sdt>/g
+  const before = originalParaXml.match(sdtRe) ?? []
+  let i = 0
+  return patched.replace(sdtRe, (sdt) => {
+    const prior = before[i++]
+    if (prior !== undefined && decodedTextOf(prior) === decodedTextOf(sdt)) return sdt
+    return sdt
+      .replace(/<w:showingPlcHdr\s*\/>/g, '')
+      .replace(/<w:rStyle w:val="(?:[^"]*Platzhalter[^"]*|[^"]*Placeholder[^"]*)"\s*\/>/gi, '')
+  })
+}

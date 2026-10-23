@@ -1,3 +1,4 @@
+import { patchFieldParagraphText } from './text-patch'
 import { sdtCheckboxGlyphs, sdtCheckboxIsChecked, syncSdtCheckbox } from './checkbox-control'
 import type {
   CellMargins,
@@ -666,6 +667,12 @@ function patchCellXml(tcXml: string, paras: readonly CellParaPatch[]): string | 
           : `<w:p>${firstPPr}<w:r>${rPr}${cellRunContentXml(entry)}</w:r>${keep}</w:p>`
       }
       const template = originals[Math.min(i, originals.length - 1)] ?? ''
+      // Vound fork: a text-only edit in a paragraph with a field or control keeps the
+      // original bytes around the changed w:t (see patchFieldParagraphText)
+      if (aligned && !entry.xml && !entry.format) {
+        const surgical = patchFieldParagraphText(template, entry.runs)
+        if (surgical !== null) return surgical
+      }
       const pPr = entry.format
         ? mergeCellParaFormat(pPrOf(template), entry.format, entry.original)
         : pPrOf(template)

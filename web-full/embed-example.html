@@ -1,0 +1,23 @@
+<!doctype html>
+<!-- Minimal host page: embeds the built editor in an iframe, opens a .docx, receives every save. -->
+<html><body style="margin:0;font:14px system-ui">
+<div style="padding:8px;display:flex;gap:8px;align-items:center">
+  <input type="file" id="file" accept=".docx" /> <button id="save">Save (ask editor)</button> <span id="status"></span>
+</div>
+<iframe id="editor" src="./dist/index.html" style="width:100%;height:calc(100vh - 44px);border:0"></iframe>
+<script>
+  const frame = document.getElementById('editor'); const status = document.getElementById('status'); let ready = false
+  window.addEventListener('message', (e) => {
+    if (e.source !== frame.contentWindow) return   // in production also check e.origin
+    const m = e.data; if (!m || typeof m.type !== 'string') return
+    if (m.type === 'vound:ready') { ready = true; status.textContent = 'editor ready' }
+    if (m.type === 'vound:saved') { status.textContent = `saved ${m.name}: ${m.bytes.byteLength} bytes`; /* upload m.bytes here */ }
+    if (m.type === 'vound:error') status.textContent = 'error: ' + m.message
+  })
+  document.getElementById('file').onchange = async (e) => {
+    const f = e.target.files[0]; if (!f || !ready) return
+    const bytes = await f.arrayBuffer()
+    frame.contentWindow.postMessage({ type: 'vound:open', name: f.name, bytes }, '*', [bytes])
+  }
+  document.getElementById('save').onclick = () => frame.contentWindow.postMessage({ type: 'vound:command', command: 'save' }, '*')
+</script></body></html>

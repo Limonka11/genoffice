@@ -83,7 +83,7 @@ import type {
   ThemeFonts,
 } from './types'
 import { PAGE_MARK, TOTAL_PAGES_MARK } from './types'
-import { patchParagraphTexts } from './text-patch'
+import { patchFieldParagraphText, patchParagraphTexts } from './text-patch'
 import { balanceFieldChars } from './field-balance'
 import {
   mergeDefaultFontsXml,
@@ -1588,7 +1588,17 @@ export async function saveDocx(
       }
     } else if (fb.kind === 'generated') {
       if (fb.docxIndex !== undefined) fbDocxIndex = fb.docxIndex
-      xml = generateParagraphXml(fb.block, genCtx)
+      // Vound fork: an in-place text edit of a paragraph holding a field or a content
+      // control patches the original XML instead of rebuilding it (patchFieldParagraphText)
+      const originalPara =
+        fb.docxIndex !== undefined && !fb.block.sdtShell
+          ? parsed.blocks.find((b) => b.docxIndex === fb.docxIndex)?.originalXml
+          : undefined
+      const surgical =
+        originalPara && /^<w:p[\s>]/.test(originalPara)
+          ? patchFieldParagraphText(originalPara, fb.block.runs)
+          : null
+      xml = surgical ?? generateParagraphXml(fb.block, genCtx)
       // If the original paragraph was inside a w:sdt shell, re-wrap it
       const shell = fb.block.sdtShell
       if (shell && !unwrapTags.has(shell.tag)) {
