@@ -22,6 +22,8 @@ jobs:
       - name: Unit tests of the engine change
         run: npx vitest run tests/field-paragraph-text-patch.test.ts
         working-directory: packages/docx-engine
+      - name: Unit tests of the browser host
+        run: npx vitest run web-full/__tests__
       # npm layout: one package/ root holding package.json, COMMIT, the licence
       # files and the static files, so the app can install the asset by URL.
       # --short=8 keeps the tag as long as a full local clone prints it.

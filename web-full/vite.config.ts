@@ -51,6 +51,9 @@ function fontMetricsManifest(): Plugin {
 // Spike-only: the host decides whether the body is editable. The desktop app locks the body when the
 // document carries an enforced w:documentProtection (edit="forms" / "readOnly"); our review UI fills
 // such forms on purpose, so that lock is lifted here. settings.xml keeps the protection untouched on save.
+// The call also passes emitUpdate = false: Tiptap's setEditable emits an 'update' event by default, which
+// the app counts as an edit, so opening a protected form would report unsaved changes (vound:dirty) before
+// the reviewer typed anything. Changing editability is not an edit; the effect's own state change re-renders.
 function hostDecidesEditability(): Plugin {
   return {
     name: 'genoffice-host-editability',
@@ -58,7 +61,23 @@ function hostDecidesEditability(): Plugin {
       if (!id.endsWith('/apps/docs/src/renderer/App.tsx')) return null
       const needle = 'editor.setEditable(!readMode && !isProtected)'
       if (!code.includes(needle)) throw new Error('host-editability: App.tsx gate not found, update the spike')
-      return { code: code.replace(needle, 'editor.setEditable(!readMode)'), map: null }
+      return { code: code.replace(needle, 'editor.setEditable(!readMode, false)'), map: null }
+    },
+  }
+}
+
+// The host warns before closing an editor with unsaved changes, so it has to hear when they appear and
+// when a save clears them. App.tsx recomputes its composite dirty state on every render (every edit path
+// re-renders); after each commit, hand it to the shim, which posts vound:dirty when it changed.
+function hostReportsDirty(): Plugin {
+  return {
+    name: 'genoffice-host-dirty',
+    transform(code, id) {
+      if (!id.endsWith('/apps/docs/src/renderer/App.tsx')) return null
+      const needle = 'anyDirtyRef.current = hasUnsavedChanges'
+      if (code.split(needle).length !== 2) throw new Error('host-dirty: App.tsx dirty state not found once, update the transform')
+      const report = ';\nuseEffect(() => { window.desktop.hostDirty?.(!!doc && hasUnsavedChanges) });\n'
+      return { code: code.replace(needle, needle + report), map: null }
     },
   }
 }
@@ -82,7 +101,7 @@ export default defineConfig({
   // relative asset URLs so the built host can be served under any path (e.g. /editor/)
   base: './',
   build: { outDir: resolve(__dirname, 'dist'), emptyOutDir: true, target: 'es2022' },
-  plugins: [react(), hostEndpoints(), fontMetricsManifest(), hostDecidesEditability(), headerStripFont()],
+  plugins: [react(), hostEndpoints(), fontMetricsManifest(), hostDecidesEditability(), hostReportsDirty(), headerStripFont()],
   resolve: {
     alias: {
       '@genoffice/docx-engine/lazy-media': resolve(root, 'packages/docx-engine/src/lazy-media.ts'),

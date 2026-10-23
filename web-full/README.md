@@ -23,18 +23,29 @@ npm run build:web-host         # -> web-full/dist (static, relative asset paths,
 
 ## Embed
 
-Serve `web-full/dist` under any path and put it in an iframe. The contract is `embed-protocol.ts`:
+Serve `web-full/dist` under any path of the host's own origin and put it in an iframe. The contract
+is `embed-protocol.ts`:
 
 | direction | message |
 |---|---|
 | host → editor | `{ type: 'vound:open', name, bytes: ArrayBuffer }` open a document (transfer the buffer) |
-| host → editor | `{ type: 'vound:command', command: 'save' \| 'save-as' \| 'undo' \| 'redo' }` |
+| host → editor | `{ type: 'vound:command', command: 'save' }` save now, the same path as ⌘S |
 | editor → host | `{ type: 'vound:ready' }` after the editor subscribed to open requests |
 | editor → host | `{ type: 'vound:saved', name, bytes: ArrayBuffer }` on every save (⌘S, File › Save, the save command) |
-| editor → host | `{ type: 'vound:error', message }` |
+| editor → host | `{ type: 'vound:dirty', dirty: boolean }` when unsaved changes appear or a save clears them |
+| editor → host | `{ type: 'vound:error', message }` open or save failed |
 
-`embed-example.html` is a working host page. In production, check `event.origin` on both sides and
-serve the editor from its own origin or path. The editor never persists anything itself when embedded;
+Host and editor must share one origin. The editor accepts a message only when `event.origin` is its
+own origin and `event.source` is `window.parent` (`embedMessages.ts`), reads it structurally and drops
+anything else; it posts with `targetOrigin = window.location.origin`. The host should do the same in
+reverse: accept only `frame.contentWindow` on its own origin, post with `location.origin`, never `'*'`.
+
+`vound:dirty` comes from the app's own unsaved-changes state (`isDocDirty`, the one the close guard and
+autosave read). The `hostReportsDirty` transform in `vite.config.ts` hands it to the shim after every
+render, and the shim posts only when the value changed. Opening a document starts clean; a save that
+completes reports `dirty: false`.
+
+`embed-example.html` is a working host page. The editor never persists anything itself when embedded;
 the host receives the bytes and stores them.
 
 ## Develop

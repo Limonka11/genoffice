@@ -8,16 +8,17 @@
 <script>
   const frame = document.getElementById('editor'); const status = document.getElementById('status'); let ready = false
   window.addEventListener('message', (e) => {
-    if (e.source !== frame.contentWindow) return   // in production also check e.origin
+    if (e.origin !== location.origin || e.source !== frame.contentWindow) return
     const m = e.data; if (!m || typeof m.type !== 'string') return
     if (m.type === 'vound:ready') { ready = true; status.textContent = 'editor ready' }
     if (m.type === 'vound:saved') { status.textContent = `saved ${m.name}: ${m.bytes.byteLength} bytes`; /* upload m.bytes here */ }
+    if (m.type === 'vound:dirty') document.title = m.dirty ? '• unsaved changes' : 'editor'
     if (m.type === 'vound:error') status.textContent = 'error: ' + m.message
   })
   document.getElementById('file').onchange = async (e) => {
     const f = e.target.files[0]; if (!f || !ready) return
     const bytes = await f.arrayBuffer()
-    frame.contentWindow.postMessage({ type: 'vound:open', name: f.name, bytes }, '*', [bytes])
+    frame.contentWindow.postMessage({ type: 'vound:open', name: f.name, bytes }, location.origin, [bytes])
   }
-  document.getElementById('save').onclick = () => frame.contentWindow.postMessage({ type: 'vound:command', command: 'save' }, '*')
+  document.getElementById('save').onclick = () => frame.contentWindow.postMessage({ type: 'vound:command', command: 'save' }, location.origin)
 </script></body></html>

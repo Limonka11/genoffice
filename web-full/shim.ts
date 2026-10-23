@@ -3,14 +3,19 @@
 // Save: every save is POSTed to the dev server (GENOFFICE_SAVE_DIR) and offered as a browser download.
 // Font metrics: answered from font-metrics.json next to index.html (written at build time, the macOS
 // snapshot); the dev server has no such file and answers from the installed fonts instead.
-import { isEmbedded, type EditorToHost, type HostToEditor } from './embed-protocol'
+import { isEmbedded, type EditorToHost } from './embed-protocol'
+import { acceptsHostMessage, readHostMessage } from './embedMessages'
 import { fontMetricsFor, isFontMetricsManifest, type FontMetricsManifest } from './fontMetricsLookup'
 type Handler = (...args: unknown[]) => void
 const calls: string[] = []
 let openHandler: Handler | null = null
 let menuHandler: Handler | null = null
 const embedded = isEmbedded()
-const toHost = (msg: EditorToHost, transfer: Transferable[] = []) => { if (embedded) window.parent.postMessage(msg, '*', transfer) }
+// same-origin only: the host and the editor are served from one origin (embed-protocol.ts)
+const toHost = (msg: EditorToHost, transfer: Transferable[] = []) => { if (embedded) window.parent.postMessage(msg, window.location.origin, transfer) }
+// the app reports its unsaved-changes state on every render (vite.config.ts, hostReportsDirty); the host hears changes only
+let lastDirty = false
+const hostDirty = (dirty: boolean) => { if (dirty === lastDirty) return; lastDirty = dirty; toHost({ type: 'vound:dirty', dirty }) }
 const params = new URLSearchParams(location.search)
 const docName = params.get('doc')
 const lastSave: { name: string; bytes: Uint8Array | null; url: string | null } = { name: '', bytes: null, url: null }
@@ -87,6 +92,7 @@ const known: Record<string, unknown> = {
   saveDocxTo: (path: string, data: ArrayBuffer) => persist(path, data, false),
   writeRecoveryCopy: async () => ({ ok: true }),
   onOpenDocx: (h: Handler) => { openHandler = h; if (embedded) toHost({ type: 'vound:ready' }); return () => { openHandler = null } },
+  hostDirty,
   onMenuCommand: (h: Handler) => { menuHandler = h; return () => { menuHandler = null } },
 }
 export function installDesktopShim() {
@@ -108,14 +114,15 @@ export function installDesktopShim() {
   }
   w.__full = api
   if (embedded) {
-    window.addEventListener('message', (event: MessageEvent<HostToEditor>) => {
-      const msg = event.data
-      if (!msg || typeof msg !== 'object' || typeof msg.type !== 'string' || !msg.type.startsWith('vound:')) return
+    window.addEventListener('message', (event: MessageEvent<unknown>) => {
+      if (!acceptsHostMessage(event, { origin: window.location.origin, parent: window.parent })) return
+      const msg = readHostMessage(event.data)
+      if (!msg) return
       if (msg.type === 'vound:open') {
         const file = new File([msg.bytes], msg.name.endsWith('.docx') ? msg.name : `${msg.name}.docx`)
         if (openHandler) openHandler(fileResult(file))
         else toHost({ type: 'vound:error', message: 'editor not ready for open yet' })
-      } else if (msg.type === 'vound:command') {
+      } else {
         if (menuHandler) menuHandler(msg.command)
         else toHost({ type: 'vound:error', message: 'editor has no command handler yet' })
       }
