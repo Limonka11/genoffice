@@ -916,6 +916,7 @@ function blockToPmNode(
         type: 'docHeading',
         attrs: {
           docxIndex: block.docxIndex,
+          docxPara: block.sourceParaIndex ?? null,
           styleId: block.styleId ?? null,
           aiChanged: false,
           level: block.level ?? 1,
@@ -937,6 +938,7 @@ function blockToPmNode(
         type: 'docListItem',
         attrs: {
           docxIndex: block.docxIndex,
+          docxPara: block.sourceParaIndex ?? null,
           styleId: block.styleId ?? null,
           aiChanged: false,
           kind: block.list?.kind ?? 'bullet',
@@ -959,6 +961,7 @@ function blockToPmNode(
         type: 'docParagraph',
         attrs: {
           docxIndex: block.docxIndex,
+          docxPara: block.sourceParaIndex ?? null,
           styleId: block.styleId ?? null,
           aiChanged: false,
           bookmarks: block.bookmarks ?? null,
@@ -998,6 +1001,7 @@ function blockToPmNode(
         type: 'docProtected',
         attrs: {
           docxIndex: block.docxIndex,
+          docxPara: block.sourceParaIndex ?? null,
           blockRevision: block.blockRevision ?? null,
           blockType: block.type,
           styleId: block.styleId ?? null,
@@ -1328,12 +1332,15 @@ function cellContentNodes(cell: TableCell): PmNode[] {
   ).map((paragraph) => {
     const list = 'list' in paragraph ? paragraph.list : undefined
     const styleId = ('styleId' in paragraph ? paragraph.styleId : undefined) ?? null
+    const docxPara =
+      ('sourceParaIndex' in paragraph ? paragraph.sourceParaIndex : undefined) ?? null
     return list
       ? {
           type: 'docListItem',
           attrs: {
             ...formatAttrs(paragraph, paragraph.runs),
             styleId,
+            docxPara,
             kind: list.kind,
             numId: list.numId,
             ilvl: list.ilvl,
@@ -1342,7 +1349,7 @@ function cellContentNodes(cell: TableCell): PmNode[] {
         }
       : {
           type: 'docParagraph',
-          attrs: { ...formatAttrs(paragraph, paragraph.runs), styleId },
+          attrs: { ...formatAttrs(paragraph, paragraph.runs), styleId, docxPara },
           content: runsToInline(paragraph.runs),
         }
   })

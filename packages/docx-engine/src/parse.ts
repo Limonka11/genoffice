@@ -234,6 +234,12 @@ import {
   resolveRelationshipTargetPath,
 } from './parse-package'
 import { parseSdtBlock, sdtMeta, sdtTableXml, splitSdtParts } from './parse-sdt'
+import {
+  paragraphIndexAt,
+  paragraphIndexMap,
+  paragraphStartOffsets,
+  paragraphsBefore,
+} from './source-para-index'
 import { sdtCheckboxControl } from './checkbox-control'
 import { paraCsFormat, parseStyles } from './parse-styles'
 import {
@@ -355,6 +361,9 @@ export interface ParseOptions {
   expandAltChunks?: boolean
   /** run the property resolver beside the legacy path and collect disagreements in extras.resolveDiff */
   shadowResolve?: boolean
+  /** stamp blocks and cell paragraphs with Block.sourceParaIndex (false in the
+   *  altChunk sub-parse: its indices would be chunk-local) */
+  sourceParaIndex?: boolean
 }
 
 export async function parseDocx(
@@ -470,6 +479,9 @@ export async function parseDocx(
     resolver,
     ...(resolveDiff ? { resolveDiff } : {}),
     sourcePath: docPath,
+    ...(options.sourceParaIndex === false
+      ? {}
+      : { paragraphStarts: paragraphStartOffsets(documentXml) }),
     styles,
     rels,
     numFormats,
@@ -515,12 +527,13 @@ export async function parseDocx(
         elements.push({ name: part.name, start: el.start + part.start, end: el.start + part.end })
         const childXml = xml.slice(part.childStart, part.childEnd)
         // real document offsets (not 0): sectionAt resolves page geometry by them
-        const block = await buildBlock(
-          { name: part.name, start: el.start + part.childStart, end: el.start + part.childEnd },
-          i,
-          childXml,
-          buildCtx,
-        )
+        const childEl = {
+          name: part.name,
+          start: el.start + part.childStart,
+          end: el.start + part.childEnd,
+        }
+        const block = await buildBlock(childEl, i, childXml, buildCtx)
+        stampSourceParagraph(block, childEl, childXml, buildCtx)
         block.originalXml = xml.slice(part.start, part.end)
         block.sdtShell = {
           ...meta,
@@ -550,6 +563,7 @@ export async function parseDocx(
     const i = elements.length
     elements.push(el)
     const block = await buildBlock(el, i, xml, buildCtx, zoteroFieldParagraphs.get(el.start))
+    stampSourceParagraph(block, el, xml, buildCtx)
     blocks.push(block)
     buildCtx.floatTableAhead = floatTableColumnSpan(block, sectionAt(el.start))
   }
@@ -742,6 +756,42 @@ interface BuildContext {
   vmlShapeTypes?: ReadonlyMap<string, Record<string, string>>
   /** Per-document identity source for editable Zotero fields. */
   nextZoteroFieldId?: number
+  /** document.xml offsets of every counted paragraph (source-para-index.ts);
+   *  absent when the parse does not stamp source paragraph indices */
+  paragraphStarts?: number[]
+}
+
+/**
+ * Stamp a block built from a body paragraph with its source paragraph index.
+ * The paragraph's own opening tag must be a counted paragraph start: a direct
+ * w:p starts at its element, a content control's paragraph inside it; a
+ * w:ins/w:del wrapper names its paragraph only when it holds exactly one.
+ * Tables carry the index on their cell paragraphs instead.
+ */
+function stampSourceParagraph(block: Block, el: BodyElement, xml: string, ctx: BuildContext) {
+  const starts = ctx.paragraphStarts
+  if (!starts || block.type === 'table') return
+  const index = sourceParagraphIndexOf(block, el, xml, starts)
+  if (index !== undefined) block.sourceParaIndex = index
+}
+
+function sourceParagraphIndexOf(
+  block: Block,
+  el: BodyElement,
+  xml: string,
+  starts: number[],
+): number | undefined {
+  if (el.name === 'w:p') return paragraphIndexAt(starts, el.start)
+  if (el.name === 'w:sdt') {
+    const paragraph = parseSdtBlock(xml)
+    return paragraph ? paragraphIndexAt(starts, el.start + paragraph.pOffset) : undefined
+  }
+  // a revision wrapper's block is built from its paragraph only when blockRevision is set
+  if ((el.name === 'w:ins' || el.name === 'w:del') && block.blockRevision) {
+    const first = paragraphsBefore(starts, el.start)
+    return paragraphsBefore(starts, el.end) - first === 1 ? first : undefined
+  }
+  return undefined
 }
 
 /** numbering reference of a paragraph: direct w:numPr, falling back to the pStyle's
@@ -823,7 +873,7 @@ async function expandAltChunk(
       }
       return []
     }
-    const sub = await parseDocx(bytes, { expandAltChunks: false })
+    const sub = await parseDocx(bytes, { expandAltChunks: false, sourceParaIndex: false })
     for (const [id, info] of sub.styles) if (!styles.has(id)) styles.set(id, info)
     let nextNumId = 1
     for (const id of numbering.keys()) nextNumId = Math.max(nextNumId, (Number(id) || 0) + 1)
@@ -917,7 +967,7 @@ async function buildBlock(
       ...base,
       type: 'table',
       ...tableSummary(xml),
-      table: extractTable(xml, ctx, el.start),
+      table: extractTable(xml, ctx, el.start, el.end),
     }
   }
 
@@ -932,7 +982,7 @@ async function buildBlock(
         ...base,
         type: 'table',
         ...tableSummary(tblXml),
-        table: extractTable(tblXml, ctx, el.start),
+        table: extractTable(tblXml, ctx, el.start, el.end),
       }
     }
     const sdtResult = parseSdtBlock(xml)
@@ -4020,10 +4070,16 @@ function foldFieldCodeParagraphs(blocks: Block[], ctx: BuildContext): void {
     tail.fieldDisplay = fieldDisplay
     tail.previewText = plainText(joined)
     tail.label = fieldLabel(joined)
+    // a legacy field is addressed at its begin paragraph: the tail that displays
+    // the field carries the first head's index, the hidden heads none
+    const fieldParagraph = blocks[i].sourceParaIndex
     for (let k = i; k < end; k++) {
       blocks[k].invisibleMarker = true
       delete blocks[k].fieldDisplay
+      delete blocks[k].sourceParaIndex
     }
+    if (fieldParagraph === undefined) delete tail.sourceParaIndex
+    else tail.sourceParaIndex = fieldParagraph
     i = end
   }
 }
@@ -4911,15 +4967,28 @@ function tableSummary(xml: string): { label: string; previewText: string } {
  *
  * @param docOffset the table's document.xml offset: cell paragraphs resolve
  *   their character-unit indents under that section's document grid
+ * @param docEnd end of the table's body element in document.xml: with
+ *   docOffset it bounds the paragraphs the cells are numbered from
  */
-function extractTable(xml: string, ctx: BuildContext, docOffset?: number): TableModel | undefined {
+function extractTable(
+  xml: string,
+  ctx: BuildContext,
+  docOffset?: number,
+  docEnd?: number,
+): TableModel | undefined {
   // whole try: hostile depth inside a cell paragraph can overflow the
   // run-extraction recursion — degrade to a protected block, not a failed document
   try {
     const parsed = deepXmlParser.parse(xml) as XNode[]
     const tbl = parsed.find((n) => nameOf(n) === 'w:tbl')
     if (!tbl) return undefined
-    const model = extractTableModel(tbl, ctx, 1, docOffset)
+    const model = extractTableModel(
+      tbl,
+      ctx,
+      1,
+      docOffset,
+      tableParagraphOrdinals(tbl, ctx, docOffset, docEnd),
+    )
     if (!model) return undefined
     const rawTrPrs: Array<string | null> = model.rows.map(() => null)
     attachRawTablePr(xml, model.rows, rawTrPrs)
@@ -4928,6 +4997,24 @@ function extractTable(xml: string, ctx: BuildContext, docOffset?: number): Table
   } catch {
     return undefined
   }
+}
+
+/**
+ * Source paragraph index of every paragraph node in a body table, or undefined
+ * when the tree walk and the string scan disagree on how many paragraphs the
+ * table's body element holds (then the table stamps nothing).
+ */
+function tableParagraphOrdinals(
+  tbl: XNode,
+  ctx: BuildContext,
+  docStart: number | undefined,
+  docEnd: number | undefined,
+): Map<XNode, number> | undefined {
+  const starts = ctx.paragraphStarts
+  if (!starts || docStart === undefined || docEnd === undefined) return undefined
+  const base = paragraphsBefore(starts, docStart)
+  const ordinals = paragraphIndexMap(tbl, base)
+  return ordinals.size === paragraphsBefore(starts, docEnd) - base ? ordinals : undefined
 }
 
 /** One w:tbl node → display model (shared by top-level tables and tables nested in cells) */
@@ -5149,6 +5236,8 @@ function extractTableModel(
   ctx: BuildContext,
   depth = 1,
   docOffset?: number,
+  /** source paragraph index by paragraph node (tableParagraphOrdinals) */
+  ordinals?: Map<XNode, number>,
 ): TableModel | undefined {
   const grid = findChild(tbl, 'w:tblGrid')
   let colWidthsPct: number[] | undefined
@@ -5347,7 +5436,7 @@ function extractTableModel(
       for (let k = j + 1; k < tcs.length && hMergeContinues(tcs[k]); k++) visSpan += spanOf(tcs[k])
       const conds = cellConds(look, rows.length, rowCount, col, visSpan, totalCols)
       col += span
-      const cell = extractCell(tc, ctx, depth, docOffset, tableStyleId, conds)
+      const cell = extractCell(tc, ctx, depth, docOffset, tableStyleId, conds, ordinals)
       const a = attrsOf(findChildren(findChild(tc, 'w:tcPr') ?? {}, 'w:tcW').at(-1) ?? {})
       const rawW = !a['w:type'] || a['w:type'] === 'dxa' ? Number(a['w:w']) : NaN
       const tcw = rawW > 0 ? rawW : undefined
@@ -5680,6 +5769,7 @@ function extractCell(
   docOffset?: number,
   tableStyleId?: string,
   conds: TableCond[] = [],
+  ordinals?: Map<XNode, number>,
 ): TableCell {
   const cell: TableCell = { paras: [] }
   const richParas: NonNullable<TableCell['richParas']> = []
@@ -5736,13 +5826,15 @@ function extractCell(
       const model =
         depth >= MAX_TABLE_NEST_DEPTH
           ? flattenedTableModel(block)
-          : extractTableModel(block, ctx, depth + 1, docOffset)
+          : extractTableModel(block, ctx, depth + 1, docOffset, ordinals)
       if (model) {
         nested.push(model)
         nestedAnchors.push(cell.paras.length)
       }
       continue
     }
+    // looked up on the original node: `p` may become a copy without its anchored boxes
+    const sourceParaIndex = ordinals?.get(block)
     let p = block
     // anchored shapes/textboxes in cell paragraphs (blip images already ride the
     // runs): Word renders them inside the cell and grows the row to hold them
@@ -5831,6 +5923,7 @@ function extractCell(
       ...(emptyFont ? { emptyRunFontFamily: emptyFont } : {}),
       ...(markSz ? { markSizeHalfPoints: markSz } : {}),
       ...(list ? { list } : {}),
+      ...(sourceParaIndex !== undefined ? { sourceParaIndex } : {}),
       runs,
     })
     if (paraText !== '') textParaJcs.add(attrsOf(findChild(pPr ?? {}, 'w:jc') ?? {})['w:val'] ?? '')

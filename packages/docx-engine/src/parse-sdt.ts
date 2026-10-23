@@ -4,10 +4,12 @@ import type { SdtShell } from './types'
 
 /**
  * Extract a SdtShell from a raw <w:sdt>…</w:sdt> XML string.
- * Returns the shell metadata + the first <w:p> found in <w:sdtContent>,
- * or null if no usable paragraph is found.
+ * Returns the shell metadata + the first <w:p> found in <w:sdtContent> (and its
+ * offset in `sdtXml`), or null if no usable paragraph is found.
  */
-export function parseSdtBlock(sdtXml: string): { shell: SdtShell; pXml: string } | null {
+export function parseSdtBlock(
+  sdtXml: string,
+): { shell: SdtShell; pXml: string; pOffset: number } | null {
   // --- find the sdtContent region ---
   // sdtContent is a direct child of w:sdt; its content may be a w:p or w:tbl
   const contentOpen = /<w:sdtContent(?:\s[^>]*)?>/.exec(sdtXml)
@@ -54,6 +56,7 @@ export function parseSdtBlock(sdtXml: string): { shell: SdtShell; pXml: string }
   return {
     shell: { ...sdtMeta(sdtXml), openXml, closeXml },
     pXml,
+    pOffset: contentTagEnd + pStart,
   }
 }
 

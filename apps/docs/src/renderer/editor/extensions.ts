@@ -266,6 +266,9 @@ export * from './decoration-extensions'
 
 const anchorAttrs = {
   docxIndex: { default: null as number | null },
+  /** source paragraph index (Block.sourceParaIndex): this paragraph's w:p among all
+   *  paragraphs of the original document.xml; null for paragraphs made in the editor */
+  docxPara: { default: null as number | null },
   /** JSON of the table-style paragraph properties (convert.ts tableStyleParaAttr); display only */
   tblPara: { default: null as string | null },
   styleId: { default: null as string | null },
@@ -942,6 +945,7 @@ function blockAttrs(
 ): Record<string, string> {
   const attrs: Record<string, string> = {}
   if (node.attrs.docxIndex !== null) attrs['data-idx'] = String(node.attrs.docxIndex)
+  if (node.attrs.docxPara != null) attrs['data-src-p'] = String(node.attrs.docxPara)
   // paragraph formatting round-trips the clipboard through this attribute:
   // the CSS below renders it, but nothing parses that CSS back (r117)
   const clip = clipboardParaPayload(node.attrs)
@@ -4760,6 +4764,8 @@ export const DocProtected = Node.create({
   addAttributes() {
     return {
       docxIndex: { default: null as number | null },
+      /** source paragraph index of the paragraph behind this block (see anchorAttrs) */
+      docxPara: { default: null as number | null },
       blockRevision: { default: null as Record<string, string> | null },
       blockType: { default: 'passthrough' },
       /** w:pStyle of field/TOC paragraphs: doc style CSS (spacing/line-height) targets data-style */
@@ -5208,6 +5214,7 @@ function protectedDomSpec(node: PmNode): DomSpec {
     'data-idx': docxIndex === null ? '' : String(docxIndex),
     class: `doc-protected doc-protected-${blockType}`,
   }
+  if (node.attrs.docxPara != null) attrs['data-src-p'] = String(node.attrs.docxPara)
   // field/TOC paragraphs keep their paragraph style so document CSS
   // (TOC1 spacing etc.) reaches the wrapper like any styled paragraph
   if (node.attrs.styleId) attrs['data-style'] = String(node.attrs.styleId)

@@ -1269,6 +1269,9 @@ export interface TableParagraph extends ParaFormat {
   styleId?: string
   /** list paragraph inside the cell (w:numPr) */
   list?: { kind: 'bullet' | 'ordered'; numId: string; ilvl: number }
+  /** document-order index of this paragraph's w:p in the original document.xml
+   *  (see source-para-index.ts); read-only, never written back */
+  sourceParaIndex?: number
 }
 
 /** One cell border (a w:tcBorders child element) */
@@ -1572,6 +1575,10 @@ export interface Block {
   docxIndex: number | null
   /** exact XML slice from the original document.xml (patch passthrough basis) */
   originalXml: string | null
+  /** document-order index of this paragraph's w:p in the original document.xml
+   *  (see source-para-index.ts); set for every block built from a body paragraph,
+   *  whatever its type; read-only, never written back */
+  sourceParaIndex?: number
   /** expanded from a w:altChunk part: the chunk's own (modern) layout, not the host's compat mode */
   altChunk?: boolean
   /** heading level 1-9 (type === 'heading') */

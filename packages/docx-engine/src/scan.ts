@@ -49,7 +49,9 @@ const NAME_RE = /^<\/?\s*([A-Za-z_][\w:.-]*)/
  */
 const TEXT_ELEMENTS = new Set(['w:t', 'w:delText', 'w:instrText', 'w:delInstrText', 'a:t', 'm:t'])
 
-function opaqueEnd(documentXml: string, start: number): number | null {
+/** end of the comment, CDATA section, processing instruction or declaration opening at
+ *  `start`, or null when `start` opens an element tag */
+export function opaqueEnd(documentXml: string, start: number): number | null {
   if (documentXml.startsWith('<!--', start)) {
     const at = documentXml.indexOf('-->', start + 4)
     return at === -1 ? documentXml.length : at + 3
