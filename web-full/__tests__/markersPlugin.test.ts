@@ -79,11 +79,11 @@ describe('markersPlugin', () => {
 
   it('does not walk the document per edit when every marker missed a stamped document', () => {
     // all indices stale or in nested tables: nothing is placed, but the document carries source indices
-    let state = withMeta(stateWith(...paragraphs(0, 3)), { markers: [marker('stale', 40), marker('nested', 41)] })
+    const state = withMeta(stateWith(...paragraphs(0, 3)), { markers: [marker('stale', 40), marker('nested', 41)] })
     expect(decorated(state)).toEqual([])
     expect(markersKey.getState(state)!.placedOnce).toBe(true)
     info.mockClear()
-    state = apply(state, (tr) => tr.insertText('typed', 1))
+    apply(state, (tr) => tr.insertText('typed', 1))
     expect(info).not.toHaveBeenCalled()
   })
 
@@ -120,7 +120,14 @@ describe('markersPlugin', () => {
 
     // vound:open
     state = withMeta(state, { reset: true })
-    expect(markersKey.getState(state)).toEqual({ markers: [], current: null, sealed: false, placedOnce: false, set: DecorationSet.empty })
+    expect(markersKey.getState(state)).toEqual({
+      markers: [],
+      current: null,
+      sealed: false,
+      placedOnce: false,
+      awaitingDocument: true,
+      set: DecorationSet.empty,
+    })
     state = withMeta(state, { markers: [marker('s1', 1)] })
     expect(decorated(state).map((d) => d.id)).toEqual(['s1'])
   })
@@ -139,5 +146,24 @@ describe('markersPlugin', () => {
     // markers the host posts after the open still apply
     state = withMeta(state, { markers: [marker('new', 4)] })
     expect(decorated(state).map((d) => d.id)).toEqual(['new'])
+  })
+
+  it('clears the markers when a document replaces the opened one without vound:open', () => {
+    let state = withMeta(stateWith(...paragraphs(0, 10)), { reset: true })
+    state = withMeta(state, { markers: [marker('s50', 50)] })
+    state = replaceDocument(state, paragraphs(45, 55))
+    expect(decorated(state).map((d) => d.id)).toEqual(['s50'])
+
+    // File > Open inside the editor (or a password-protected file through loadFile) brings a foreign
+    // document that happens to carry index 50 too: the host's markers do not name it
+    state = replaceDocument(state, paragraphs(45, 55))
+    expect(decorated(state)).toEqual([])
+    expect(markersKey.getState(state)).toMatchObject({ markers: [], current: null })
+
+    // the next vound:open waits for its document again
+    state = withMeta(state, { reset: true })
+    state = withMeta(state, { markers: [marker('s46', 46)] })
+    state = replaceDocument(state, paragraphs(40, 50))
+    expect(decorated(state).map((d) => d.id)).toEqual(['s46'])
   })
 })

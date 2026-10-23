@@ -9,13 +9,29 @@ import type { SlotMarker } from './embed-protocol'
 import { hasSourceIndices, markerDecorations } from './markers'
 
 /** `placedOnce`: a build since the last vound:markers ran against a parsed document (one whose nodes carry
- *  source indices), whether or not any marker matched; until then an edit may still bring the document */
-export type MarkersState = { markers: SlotMarker[]; current: string | null; sealed: boolean; placedOnce: boolean; set: DecorationSet }
+ *  source indices), whether or not any marker matched; until then an edit may still bring the document.
+ *  `awaitingDocument`: the document of the last vound:open (or the editor's first one) has not replaced the
+ *  content yet; its whole-document replace rebuilds the markers, any later one clears them */
+export type MarkersState = {
+  markers: SlotMarker[]
+  current: string | null
+  sealed: boolean
+  placedOnce: boolean
+  awaitingDocument: boolean
+  set: DecorationSet
+}
 type MarkersMeta = { markers?: SlotMarker[]; current?: string | null; sealed?: true; reset?: true }
 
 export const markersKey = new PluginKey<MarkersState>('voundMarkers')
 
-const initial: MarkersState = { markers: [], current: null, sealed: false, placedOnce: false, set: DecorationSet.empty }
+const initial: MarkersState = {
+  markers: [],
+  current: null,
+  sealed: false,
+  placedOnce: false,
+  awaitingDocument: true,
+  set: DecorationSet.empty,
+}
 
 function rebuild(doc: PmNode, state: MarkersState): MarkersState {
   const { decorations, dropped } = markerDecorations(doc, state.markers, state.current)
@@ -31,6 +47,14 @@ const replacedWholeDocument = (tr: Transaction) =>
 
 /** a document change: map the decorations, and walk the document again only when mapping cannot be trusted */
 function afterDocChange(tr: Transaction, old: MarkersState): MarkersState {
+  if (replacedWholeDocument(tr)) {
+    // the document of the last open: markers built against the previous document while the parse ran
+    // have nothing to map from, so they are built again on the new one
+    if (old.awaitingDocument) return rebuild(tr.doc, { ...old, awaitingDocument: false })
+    // a document that came without vound:open (File > Open inside the editor, a new blank document) or
+    // replaced everything afterwards: the host's indices name another document, so the markers go
+    return { ...initial, awaitingDocument: false }
+  }
   const mapped = old.set.map(tr.mapping, tr.doc)
   const oldCount = old.set.find().length
   // phased appends, splits and deletions change the block count; a split leaves one index on two nodes
@@ -42,10 +66,7 @@ function afterDocChange(tr: Transaction, old: MarkersState): MarkersState {
   // content without changing the block count. Once a build saw a parsed document this stays off, so
   // markers that all missed it do not cost a walk per keystroke
   const neverPlaced = oldCount === 0 && !old.placedOnce
-  // a newly opened document with the same block count: markers built against the previous document
-  // while the parse ran have nothing to map from
-  const newDocument = replacedWholeDocument(tr)
-  if (blockCountChanged || decorationDropped || neverPlaced || newDocument) return rebuild(tr.doc, old)
+  if (blockCountChanged || decorationDropped || neverPlaced) return rebuild(tr.doc, old)
   return { ...old, set: mapped }
 }
 
