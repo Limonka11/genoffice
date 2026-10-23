@@ -5,6 +5,6 @@ import { defineConfig } from 'vitest/config'
 /// per-workspace scripts (including the Rust sidecar build).
 export default defineConfig({
   test: {
-    projects: ['apps/*/vitest.config.ts', 'packages/*/vitest.config.ts'],
+    projects: ['apps/*/vitest.config.ts', 'packages/*/vitest.config.ts', 'web-full/vitest.config.ts'],
   },
 })
