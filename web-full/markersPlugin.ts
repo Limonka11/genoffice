@@ -2,6 +2,7 @@
 // across edits, phased loading and re-parses, plus the calls the shim makes for vound:markers,
 // vound:scrollTo and vound:focus. Decorations live in the view only, so nothing here reaches a save.
 import { Plugin, PluginKey, type Transaction } from '@tiptap/pm/state'
+import { ReplaceStep } from '@tiptap/pm/transform'
 import { DecorationSet, type EditorView } from '@tiptap/pm/view'
 import type { Node as PmNode } from '@tiptap/pm/model'
 import type { SlotMarker } from './embed-protocol'
@@ -24,6 +25,10 @@ function rebuild(doc: PmNode, state: MarkersState): MarkersState {
   return { ...state, placedOnce, set }
 }
 
+/** a step that replaced the whole document, as Tiptap's setContent does when a document opens */
+const replacedWholeDocument = (tr: Transaction) =>
+  tr.steps.some((step, index) => step instanceof ReplaceStep && step.from === 0 && step.to === tr.docs[index].content.size)
+
 /** a document change: map the decorations, and walk the document again only when mapping cannot be trusted */
 function afterDocChange(tr: Transaction, old: MarkersState): MarkersState {
   const mapped = old.set.map(tr.mapping, tr.doc)
@@ -37,7 +42,10 @@ function afterDocChange(tr: Transaction, old: MarkersState): MarkersState {
   // content without changing the block count. Once a build saw a parsed document this stays off, so
   // markers that all missed it do not cost a walk per keystroke
   const neverPlaced = oldCount === 0 && !old.placedOnce
-  if (blockCountChanged || decorationDropped || neverPlaced) return rebuild(tr.doc, old)
+  // a newly opened document with the same block count: markers built against the previous document
+  // while the parse ran have nothing to map from
+  const newDocument = replacedWholeDocument(tr)
+  if (blockCountChanged || decorationDropped || neverPlaced || newDocument) return rebuild(tr.doc, old)
   return { ...old, set: mapped }
 }
 

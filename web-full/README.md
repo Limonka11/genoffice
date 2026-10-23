@@ -77,7 +77,8 @@ editor ignores `vound:markers` and `vound:focus` until the next `vound:open`. Af
 re-parses the saved bytes, so the nodes carry the saved file's numbering, which the host's markers do not
 name. Every `vound:open` resets the markers (`resetMarkers`: none, no current one, not sealed) before
 the document loads, so the previous document's indices never land on the new one; markers posted after
-the open apply as usual. Markers are view decorations only; nothing of them is written into a saved file.
+the open apply as usual, so the host posts markers after `vound:open`. A whole-document replace (an
+open, the re-parse after a save) always rebuilds. Markers are view decorations only; nothing of them is written into a saved file.
 
 Embedded, `boot.ts` sets `html.vound-embedded` and `host.css` hides the Genspark AI dock, the ribbon's
 AI commands (the Genspark AI group, Editor, Translate, AI Resolve Comments, AI Revision Summary) and the

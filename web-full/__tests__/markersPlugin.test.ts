@@ -92,6 +92,17 @@ describe('markersPlugin', () => {
     expect(markersKey.getState(state)!.placedOnce).toBe(false)
   })
 
+  it('builds the markers on the opened document when they arrived while the previous one was still shown', () => {
+    let state = withMeta(stateWith(...paragraphs(0, 10)), { reset: true })
+    // vound:markers lands before the app's async parse replaced the document: every index misses the old one
+    state = withMeta(state, { markers: [marker('s50', 50)] })
+    expect(decorated(state)).toEqual([])
+    // the new document arrives in one setContent with the same block count
+    state = replaceDocument(state, paragraphs(45, 55))
+    expect(state.doc.childCount).toBe(10)
+    expect(decorated(state).map((d) => d.id)).toEqual(['s50'])
+  })
+
   it('sealed: markers and current metas are ignored until an open resets everything', () => {
     let state = withMeta(stateWith(...paragraphs(0, 3)), { markers: [marker('s0', 0), marker('s2', 2)] })
     state = withMeta(state, { current: 's2' })
