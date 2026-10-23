@@ -46,7 +46,13 @@ render, and the shim posts only when the value changed. Opening a document start
 completes reports `dirty: false`.
 
 `embed-example.html` is a working host page. The editor never persists anything itself when embedded;
-the host receives the bytes and stores them.
+the host receives the bytes and stores them. Only explicit saves reach the host (⌘S, File › Save, the
+`save` command): an auto save (`saveDocx(path, data, auto = true)`) posts nothing and leaves the document
+unsaved (`embeddedSave.ts`), because every `vound:saved` becomes a published revision.
+
+Embedded, `boot.ts` sets `html.vound-embedded` and `host.css` hides the Genspark AI dock, the ribbon's
+AI commands (the Genspark AI group, Editor, Translate, AI Resolve Comments, AI Revision Summary) and the
+AutoSave toggle; the page area takes the full width.
 
 ## Develop
 

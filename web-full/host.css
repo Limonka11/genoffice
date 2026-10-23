@@ -8,3 +8,14 @@
    empty line box before the break (three line boxes for a break-only paragraph where Word has two). Keep the
    break inline so the line count matches Word; the run span still carries the break run's own line height. */
 .doc-page .doc-br-line { display: inline; }
+/* Embedded in the Vound review (boot.ts sets html.vound-embedded): no Genspark AI, no AutoSave. The host
+   publishes every explicit save, so the reviewer saves on purpose; the AI dock goes, and the page area takes
+   the full width. The AI panel stays mounted (the app keeps it mounted when collapsed too), just not shown. */
+html.vound-embedded .ai-dock { display: none !important; }
+html.vound-embedded .autosave-toggle { display: none !important; }
+/* the ribbon's AI commands: the Genspark AI group on Home (.ai-entry, all of its items) and the
+   credit-metered buttons on other tabs (Editor, Translate, AI Resolve Comments, AI Revision Summary
+   carry .ai-feature-icon). One rule each: a selector the browser rejects drops only its own rule. */
+html.vound-embedded .ribbon-group:has(.ai-entry):not(:has(.ribbon-group-items > :not(.ai-entry))) { display: none !important; }
+html.vound-embedded .ai-entry { display: none !important; }
+html.vound-embedded .rb-big:has(.ai-feature-icon) { display: none !important; }

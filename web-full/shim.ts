@@ -6,6 +6,7 @@
 // window.desktop.fontMetrics as no installed-font index).
 import { isEmbedded, type EditorToHost } from './embed-protocol'
 import { acceptsHostMessage, readHostMessage } from './embedMessages'
+import { embeddedSave } from './embeddedSave'
 type Handler = (...args: unknown[]) => void
 const calls: string[] = []
 let openHandler: Handler | null = null
@@ -40,15 +41,11 @@ function download(name: string, bytes: Uint8Array) {
   lastSave.url = url
   const a = document.createElement('a'); a.href = url; a.download = name.endsWith('.docx') ? name : `${name}.docx`; a.click()
 }
-async function persist(path: string, data: ArrayBuffer, triggerDownload: boolean) {
+async function persist(path: string, data: ArrayBuffer, triggerDownload: boolean, auto?: boolean) {
+  // the host owns persistence when embedded; only explicit saves reach it (embeddedSave.ts)
+  if (embedded) return embeddedSave(path, data, auto, toHost)
   const name = path.split('/').pop()!.replace(/\.docx$/, '')
   lastSave.name = name; lastSave.bytes = new Uint8Array(data)
-  if (embedded) {
-    // the host owns persistence: hand it a copy of the bytes and report success
-    const copy = data.slice(0)
-    toHost({ type: 'vound:saved', name, bytes: copy }, [copy])
-    return { ok: true, path }
-  }
   const res = await fetch(`/__save?name=${encodeURIComponent(name)}`, { method: 'POST', body: data }).catch(() => null)
   if (triggerDownload) download(name, lastSave.bytes)
   return { ok: !!res && res.ok, path }
@@ -79,7 +76,8 @@ const known: Record<string, unknown> = {
   openDocx: async () => { const f = await pickFile(); return f ? fileResult(f) : null },
   openDocxPath: async (path: string) => sampleResult(path.split('/').pop()!.replace(/\.docx$/, '')),
   // Save (Cmd+S) writes to the server folder and downloads; Save As / first save of a new doc do the same
-  saveDocx: (path: string, data: ArrayBuffer) => persist(path, data, true),
+  // auto is true for autosave ticks (apps/docs/src/shared/ipc.ts saveDocx)
+  saveDocx: (path: string, data: ArrayBuffer, auto?: boolean) => persist(path, data, true, auto),
   saveDocxAs: (defaultName: string, data: ArrayBuffer) => persist(`/local/${defaultName}`, data, true),
   saveDocxNew: (defaultName: string, data: ArrayBuffer) => persist(`/local/${defaultName}`, data, true),
   saveDocxTo: (path: string, data: ArrayBuffer) => persist(path, data, false),
