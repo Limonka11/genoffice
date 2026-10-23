@@ -30,6 +30,9 @@ is `embed-protocol.ts`:
 |---|---|
 | host → editor | `{ type: 'vound:open', name, bytes: ArrayBuffer }` open a document (transfer the buffer) |
 | host → editor | `{ type: 'vound:command', command: 'save' }` save now, the same path as ⌘S |
+| host → editor | `{ type: 'vound:markers', markers: SlotMarker[] }` replace all slot markers (`{ id, paragraph, scope: 'paragraph' \| 'cell', tone }`) |
+| host → editor | `{ type: 'vound:scrollTo', id }` scroll a marker to the middle of the view and make it current |
+| host → editor | `{ type: 'vound:focus', id: string \| null }` make a marker current without scrolling, or none |
 | editor → host | `{ type: 'vound:ready' }` after the editor subscribed to open requests |
 | editor → host | `{ type: 'vound:saved', name, bytes: ArrayBuffer }` on every save (⌘S, File › Save, the save command) |
 | editor → host | `{ type: 'vound:dirty', dirty: boolean }` when unsaved changes appear or a save clears them |
@@ -49,6 +52,28 @@ completes reports `dirty: false`.
 the host receives the bytes and stores them. Only explicit saves reach the host (⌘S, File › Save, the
 `save` command): an auto save (`saveDocx(path, data, auto = true)`) posts nothing and leaves the document
 unsaved (`embeddedSave.ts`), because every `vound:saved` becomes a published revision.
+
+## Markers
+
+The host highlights document paragraphs with `vound:markers`. A marker names its paragraph by the
+source paragraph index: the position of the `w:p` among all elements with local name `p` in the opened
+file's `word/document.xml`, in document order (`mc:Fallback`, comments and CDATA excluded). The engine
+stamps that index on every paragraph it models (`docxPara`, DOM `data-src-p`), and `markers.ts` turns
+each marker into a node decoration on the one node carrying it, or on the table cell around it for
+`scope: 'cell'`. An index that matches no node or more than one (a split copies the index to both
+halves) is dropped and logged with `console.info('[vound] markers dropped', ids)`; so is a cell marker
+outside a table cell. Paragraphs of nested tables are not editor nodes and cannot be marked.
+
+`markersPlugin.ts` keeps the decorations through edits and walks the document again when the block
+count changes (phased loading appends blocks after the first 64, splits, deletions), when an attribute
+change dropped a decoration, or while markers wait for their document. Markers sent before the app
+handed over its editor (`hostEditorHandle` in `vite.config.ts`) are applied when it does.
+`vound:scrollTo` and `vound:focus` add `vound-slot-current`; `host.css` holds the six tone colours.
+
+An explicit save seals the markers: `embeddedSave.ts` clears them before it posts `vound:saved`, and the
+editor ignores `vound:markers` and `vound:focus` until the next `vound:open`. After a save the app
+re-parses the saved bytes, so the nodes carry the saved file's numbering, which the host's markers do not
+name. Markers are view decorations only; nothing of them is written into a saved file.
 
 Embedded, `boot.ts` sets `html.vound-embedded` and `host.css` hides the Genspark AI dock, the ribbon's
 AI commands (the Genspark AI group, Editor, Translate, AI Resolve Comments, AI Revision Summary) and the

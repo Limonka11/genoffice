@@ -19,3 +19,13 @@ html.vound-embedded .autosave-toggle { display: none !important; }
 html.vound-embedded .ribbon-group:has(.ai-entry):not(:has(.ribbon-group-items > :not(.ai-entry))) { display: none !important; }
 html.vound-embedded .ai-entry { display: none !important; }
 html.vound-embedded .rb-big:has(.ai-feature-icon) { display: none !important; }
+/* Slot markers from the host (markersPlugin.ts): node decorations on a paragraph or a table cell, one tone
+   each. View only: decorations never reach the saved document. Fill at 28 % alpha (47), outline at 90 % (E6). */
+.vound-slot { background: #E9D5FF47; outline: 2px solid #E9D5FFE6; outline-offset: 1px; border-radius: 2px; }
+.vound-slot-proposed { background: #E9D5FF47; outline-color: #E9D5FFE6; }
+.vound-slot-gap { background: #FDE68A47; outline-color: #FDE68AE6; }
+.vound-slot-conditional { background: #FED7AA47; outline-color: #FED7AAE6; outline-style: dashed; }
+.vound-slot-refused { background: #FBCFE047; outline-color: #FBCFE0E6; }
+.vound-slot-accepted { background: #1BF5A347; outline-color: #1BF5A3E6; }
+.vound-slot-rejected { background: #F53C1B47; outline-color: #F53C1BE6; }
+.vound-slot-current { outline-width: 3px; outline-offset: 2px; box-shadow: 0 0 0 4px #0B5FFF40; }

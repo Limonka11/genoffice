@@ -4,13 +4,20 @@
 // Font metrics: the dev server answers from this machine's installed fonts. The production build has no
 // provider, so the renderer lays out from its bundled macOS snapshot (font-resolve.ts treats a missing
 // window.desktop.fontMetrics as no installed-font index).
-import { isEmbedded, type EditorToHost } from './embed-protocol'
+// Markers: the app hands over its editor (vite.config.ts, hostEditorHandle); the shim registers the
+// markers plugin on it and routes vound:markers, vound:scrollTo and vound:focus to it.
+import type { Editor } from '@tiptap/core'
+import { isEmbedded, type EditorToHost, type SlotMarker } from './embed-protocol'
 import { acceptsHostMessage, readHostMessage } from './embedMessages'
 import { embeddedSave } from './embeddedSave'
+import { markersKey, markersPlugin, scrollToMarker, sealMarkers, setCurrent, setMarkers, unsealMarkers } from './markersPlugin'
 type Handler = (...args: unknown[]) => void
 const calls: string[] = []
 let openHandler: Handler | null = null
 let menuHandler: Handler | null = null
+let hostEditor: Editor | null = null
+/** markers that arrived before the app handed over its editor */
+let pendingMarkers: SlotMarker[] | null = null
 const embedded = isEmbedded()
 // same-origin only: the host and the editor are served from one origin (embed-protocol.ts)
 const toHost = (msg: EditorToHost, transfer: Transferable[] = []) => { if (embedded) window.parent.postMessage(msg, window.location.origin, transfer) }
@@ -43,12 +50,19 @@ function download(name: string, bytes: Uint8Array) {
 }
 async function persist(path: string, data: ArrayBuffer, triggerDownload: boolean, auto?: boolean) {
   // the host owns persistence when embedded; only explicit saves reach it (embeddedSave.ts)
-  if (embedded) return embeddedSave(path, data, auto, toHost)
+  if (embedded) return embeddedSave(path, data, auto, toHost, () => { if (hostEditor) sealMarkers(hostEditor.view) })
   const name = path.split('/').pop()!.replace(/\.docx$/, '')
   lastSave.name = name; lastSave.bytes = new Uint8Array(data)
   const res = await fetch(`/__save?name=${encodeURIComponent(name)}`, { method: 'POST', body: data }).catch(() => null)
   if (triggerDownload) download(name, lastSave.bytes)
   return { ok: !!res && res.ok, path }
+}
+function handOverEditor(editor: Editor) {
+  hostEditor = editor
+  // registering a keyed plugin twice throws; a re-run effect hands over the same editor again
+  if (!markersKey.getState(editor.state)) editor.registerPlugin(markersPlugin)
+  if (pendingMarkers) setMarkers(editor.view, pendingMarkers)
+  pendingMarkers = null
 }
 const known: Record<string, unknown> = {
   getLanguage: async () => 'en',
@@ -85,6 +99,7 @@ const known: Record<string, unknown> = {
   onOpenDocx: (h: Handler) => { openHandler = h; if (embedded) toHost({ type: 'vound:ready' }); return () => { openHandler = null } },
   hostDirty,
   onMenuCommand: (h: Handler) => { menuHandler = h; return () => { menuHandler = null } },
+  hostEditor: handOverEditor,
 }
 export function installDesktopShim() {
   const w = window as unknown as Record<string, unknown>
@@ -109,13 +124,28 @@ export function installDesktopShim() {
       if (!acceptsHostMessage(event, { origin: window.location.origin, parent: window.parent })) return
       const msg = readHostMessage(event.data)
       if (!msg) return
-      if (msg.type === 'vound:open') {
-        const file = new File([msg.bytes], msg.name.endsWith('.docx') ? msg.name : `${msg.name}.docx`)
-        if (openHandler) openHandler(fileResult(file))
-        else toHost({ type: 'vound:error', message: 'editor not ready for open yet' })
-      } else {
-        if (menuHandler) menuHandler(msg.command)
-        else toHost({ type: 'vound:error', message: 'editor has no command handler yet' })
+      switch (msg.type) {
+        case 'vound:open': {
+          if (hostEditor) unsealMarkers(hostEditor.view)
+          const file = new File([msg.bytes], msg.name.endsWith('.docx') ? msg.name : `${msg.name}.docx`)
+          if (openHandler) openHandler(fileResult(file))
+          else toHost({ type: 'vound:error', message: 'editor not ready for open yet' })
+          break
+        }
+        case 'vound:command':
+          if (menuHandler) menuHandler(msg.command)
+          else toHost({ type: 'vound:error', message: 'editor has no command handler yet' })
+          break
+        case 'vound:markers':
+          if (hostEditor) setMarkers(hostEditor.view, msg.markers)
+          else pendingMarkers = msg.markers
+          break
+        case 'vound:scrollTo':
+          if (hostEditor) scrollToMarker(hostEditor.view, msg.id)
+          break
+        case 'vound:focus':
+          if (hostEditor) setCurrent(hostEditor.view, msg.id)
+          break
       }
     })
   }

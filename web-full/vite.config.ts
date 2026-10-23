@@ -57,15 +57,31 @@ function hostDecidesEditability(): Plugin {
 // The host warns before closing an editor with unsaved changes, so it has to hear when they appear and
 // when a save clears them. App.tsx recomputes its composite dirty state on every render (every edit path
 // re-renders); after each commit, hand it to the shim, which posts vound:dirty when it changed.
+const dirtyNeedle = 'anyDirtyRef.current = hasUnsavedChanges'
+const dirtyReport = ';\nuseEffect(() => { window.desktop.hostDirty?.(!!doc && hasUnsavedChanges) });\n'
 function hostReportsDirty(): Plugin {
   return {
     name: 'genoffice-host-dirty',
     transform(code, id) {
       if (!id.endsWith('/apps/docs/src/renderer/App.tsx')) return null
-      const needle = 'anyDirtyRef.current = hasUnsavedChanges'
-      if (code.split(needle).length !== 2) throw new Error('host-dirty: App.tsx dirty state not found once, update the transform')
-      const report = ';\nuseEffect(() => { window.desktop.hostDirty?.(!!doc && hasUnsavedChanges) });\n'
-      return { code: code.replace(needle, needle + report), map: null }
+      if (code.split(dirtyNeedle).length !== 2) throw new Error('host-dirty: App.tsx dirty state not found once, update the transform')
+      return { code: code.replace(dirtyNeedle, dirtyNeedle + dirtyReport), map: null }
+    },
+  }
+}
+
+// The markers plugin (markersPlugin.ts) needs the app's editor. App.tsx creates exactly one with
+// useEditor; hand it to the shim once it exists, after the dirty report (same needle, appended after it).
+function hostEditorHandle(): Plugin {
+  return {
+    name: 'genoffice-host-editor',
+    transform(code, id) {
+      if (!id.endsWith('/apps/docs/src/renderer/App.tsx')) return null
+      // hostReportsDirty runs first: the needle is followed by its dirty report
+      const reported = dirtyNeedle + dirtyReport
+      if (code.split(reported).length !== 2) throw new Error('host-editor: App.tsx dirty report not found once, update the transform')
+      const handOver = 'useEffect(() => { if (editor) window.desktop.hostEditor?.(editor) }, [editor]);\n'
+      return { code: code.replace(reported, reported + handOver), map: null }
     },
   }
 }
@@ -89,7 +105,7 @@ export default defineConfig({
   // relative asset URLs so the built host can be served under any path (e.g. /editor/)
   base: './',
   build: { outDir: resolve(__dirname, 'dist'), emptyOutDir: true, target: 'es2022' },
-  plugins: [react(), hostEndpoints(), hostDecidesEditability(), hostReportsDirty(), headerStripFont()],
+  plugins: [react(), hostEndpoints(), hostDecidesEditability(), hostReportsDirty(), hostEditorHandle(), headerStripFont()],
   resolve: {
     alias: {
       '@genoffice/docx-engine/lazy-media': resolve(root, 'packages/docx-engine/src/lazy-media.ts'),

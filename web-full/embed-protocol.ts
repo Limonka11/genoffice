@@ -2,6 +2,9 @@
  * postMessage contract between a host page (the Vound app) and this iframe.
  * Host → iframe:   { type: 'vound:open', name: string, bytes: ArrayBuffer }   open a document
  *                  { type: 'vound:command', command: 'save' }                 save now (same path as ⌘S)
+ *                  { type: 'vound:markers', markers: SlotMarker[] }            replace the slot markers (all of them)
+ *                  { type: 'vound:scrollTo', id: string }                      scroll a marker into view and make it current
+ *                  { type: 'vound:focus', id: string | null }                  make a marker current without scrolling, or none
  * Iframe → host:   { type: 'vound:ready' }                                     the editor subscribed to open requests
  *                  { type: 'vound:saved', name: string, bytes: ArrayBuffer }   every save (⌘S, File › Save, 'save' command)
  *                  { type: 'vound:dirty', dirty: boolean }                     unsaved changes appeared or were saved; sent on change
@@ -12,9 +15,17 @@
  * iframe's contentWindow on its own origin. Both post with targetOrigin = window.location.origin, so
  * host and editor have to be served from the same origin. Bytes travel as transferable ArrayBuffers.
  */
+export type MarkerTone = 'proposed' | 'gap' | 'conditional' | 'refused' | 'accepted' | 'rejected'
+/** A highlight on one paragraph of the opened document, named by its source paragraph index: the
+ *  paragraph's w:p among all w:p of the original document.xml. `cell` highlights the table cell
+ *  around that paragraph instead. Display only: markers never reach the saved bytes. */
+export type SlotMarker = { id: string; paragraph: number; scope: 'paragraph' | 'cell'; tone: MarkerTone }
 export type HostToEditor =
   | { type: 'vound:open'; name: string; bytes: ArrayBuffer }
   | { type: 'vound:command'; command: 'save' }
+  | { type: 'vound:markers'; markers: SlotMarker[] }
+  | { type: 'vound:scrollTo'; id: string }
+  | { type: 'vound:focus'; id: string | null }
 export type EditorToHost =
   | { type: 'vound:ready' }
   | { type: 'vound:saved'; name: string; bytes: ArrayBuffer }
