@@ -3,7 +3,8 @@ name: web-host bundle
 on:
   push:
     branches: [vound]
-    paths: ['web-full/**', 'packages/**', 'package.json', 'package-lock.json', '.github/workflows/web-host.yml']
+    # apps/** too: most of the bundle is apps/docs/src/renderer, and a renderer-only commit must still publish
+    paths: ['web-full/**', 'apps/**', 'packages/**', 'package.json', 'package-lock.json', '.github/workflows/web-host.yml']
   workflow_dispatch:
 
 # The repository's default token is read-only; creating the release needs write.
@@ -14,7 +15,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      # the write token stays out of .git/config for the build steps; the release step gets it via its env
       - uses: actions/checkout@v4
+        with: { persist-credentials: false }
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - run: npm ci --ignore-scripts
@@ -26,7 +29,8 @@ jobs:
         run: npx vitest run web-full/__tests__
       # npm layout: one package/ root holding package.json, COMMIT, the licence
       # files and the static files, so the app can install the asset by URL.
-      # --short=8 keeps the tag as long as a full local clone prints it.
+      # --short=8 keeps the tag as long as a full local clone prints it. Sorted names, a fixed mtime and
+      # owner and gzip -n make the tarball depend on the files alone.
       - name: Pack the bundle as an npm tarball with its commit in the name
         run: |
           SHORT=$(git rev-parse --short=8 HEAD)
@@ -36,15 +40,17 @@ jobs:
           cp LICENSE LICENSE-UNICODE.txt NOTICE package/
           printf '{"name":"@vound/genoffice-web-host","version":"0.0.0-%s","license":"Apache-2.0"}\n' "$SHORT" > package/package.json
           echo "$SHORT" > package/COMMIT
-          tar -czf "$ASSET" package
+          tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -cf - package | gzip -n > "$ASSET"
           echo "ASSET=$ASSET" >> "$GITHUB_ENV"
           echo "SHORT=$SHORT" >> "$GITHUB_ENV"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ASSET }}
           path: ${{ env.ASSET }}
+      # Releases are immutable: the app pins the asset's integrity hash, so a rerun never replaces it.
       - name: Publish as a release asset (tag web-host-<commit>)
         if: github.event_name == 'push'
-        env: { GH_TOKEN: '${{ github.token }}' }
+        env: { GH_TOKEN: '${{ github.token }}', GH_REPO: '${{ github.repository }}' }
         run: |
-          gh release create "web-host-$SHORT" "$ASSET" --target "$GITHUB_SHA" --title "web-host $SHORT" --notes "Static GenOffice Docs host built from $GITHUB_SHA, packed as the npm package @vound/genoffice-web-host. Serve it under the app's /editor/$SHORT/ path." || gh release upload "web-host-$SHORT" "$ASSET" --clobber
+          gh release view "web-host-$SHORT" >/dev/null 2>&1 && { echo "release web-host-$SHORT exists, leaving it as it is"; exit 0; }
+          gh release create "web-host-$SHORT" "$ASSET" --target "$GITHUB_SHA" --title "web-host $SHORT" --notes "Static GenOffice Docs host built from $GITHUB_SHA, packed as the npm package @vound/genoffice-web-host. Serve it under the app's /editor/$SHORT/ path."

@@ -3,7 +3,6 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import react from '@vitejs/plugin-react'
 import { defineConfig, type Plugin } from 'vite'
 import { familyVerticalMetrics } from '../packages/font-metrics/src/index'
-import { buildFontMetricsManifest } from './fontMetricsManifest'
 const root = resolve(__dirname, '..')
 const saveDir = process.env.GENOFFICE_SAVE_DIR ?? resolve(__dirname, 'saved')
 function hostEndpoints(): Plugin {
@@ -36,32 +35,21 @@ function hostEndpoints(): Plugin {
   }
 }
 
-// The static build has no server to ask for font metrics: ship the answers as font-metrics.json
-// (the macOS snapshot, see fontMetricsManifest.ts). shim.ts reads it next to index.html.
-function fontMetricsManifest(): Plugin {
-  return {
-    name: 'genoffice-font-metrics-manifest',
-    apply: 'build',
-    generateBundle() {
-      this.emitFile({ type: 'asset', fileName: 'font-metrics.json', source: JSON.stringify(buildFontMetricsManifest()) })
-    },
-  }
-}
-
 // Spike-only: the host decides whether the body is editable. The desktop app locks the body when the
 // document carries an enforced w:documentProtection (edit="forms" / "readOnly"); our review UI fills
 // such forms on purpose, so that lock is lifted here. settings.xml keeps the protection untouched on save.
-// The call also passes emitUpdate = false: Tiptap's setEditable emits an 'update' event by default, which
-// the app counts as an edit, so opening a protected form would report unsaved changes (vound:dirty) before
-// the reviewer typed anything. Changing editability is not an edit; the effect's own state change re-renders.
+// Tiptap's setEditable emits an 'update' event unless told not to, and the app counts every update as an
+// edit. The effect re-runs when isProtected changes, so opening a protected form would report unsaved
+// changes (vound:dirty) before the reviewer typed anything. The update is emitted only when editability
+// really toggles, because the nested-table node view re-applies contenteditable on 'update'.
 function hostDecidesEditability(): Plugin {
   return {
     name: 'genoffice-host-editability',
     transform(code, id) {
       if (!id.endsWith('/apps/docs/src/renderer/App.tsx')) return null
       const needle = 'editor.setEditable(!readMode && !isProtected)'
-      if (!code.includes(needle)) throw new Error('host-editability: App.tsx gate not found, update the spike')
-      return { code: code.replace(needle, 'editor.setEditable(!readMode, false)'), map: null }
+      if (code.split(needle).length !== 2) throw new Error('host-editability: App.tsx gate not found once, update the spike')
+      return { code: code.replace(needle, 'editor.setEditable(!readMode, editor.isEditable !== !readMode)'), map: null }
     },
   }
 }
@@ -101,7 +89,7 @@ export default defineConfig({
   // relative asset URLs so the built host can be served under any path (e.g. /editor/)
   base: './',
   build: { outDir: resolve(__dirname, 'dist'), emptyOutDir: true, target: 'es2022' },
-  plugins: [react(), hostEndpoints(), fontMetricsManifest(), hostDecidesEditability(), hostReportsDirty(), headerStripFont()],
+  plugins: [react(), hostEndpoints(), hostDecidesEditability(), hostReportsDirty(), headerStripFont()],
   resolve: {
     alias: {
       '@genoffice/docx-engine/lazy-media': resolve(root, 'packages/docx-engine/src/lazy-media.ts'),

@@ -1,11 +1,11 @@
 // Browser stand-in for the Electron preload bridge (window.desktop) of the Docs app.
 // Open: a browser file picker (File > Open) or a sample from /samples (?doc=name, or the host panel).
 // Save: every save is POSTed to the dev server (GENOFFICE_SAVE_DIR) and offered as a browser download.
-// Font metrics: answered from font-metrics.json next to index.html (written at build time, the macOS
-// snapshot); the dev server has no such file and answers from the installed fonts instead.
+// Font metrics: the dev server answers from this machine's installed fonts. The production build has no
+// provider, so the renderer lays out from its bundled macOS snapshot (font-resolve.ts treats a missing
+// window.desktop.fontMetrics as no installed-font index).
 import { isEmbedded, type EditorToHost } from './embed-protocol'
 import { acceptsHostMessage, readHostMessage } from './embedMessages'
-import { fontMetricsFor, isFontMetricsManifest, type FontMetricsManifest } from './fontMetricsLookup'
 type Handler = (...args: unknown[]) => void
 const calls: string[] = []
 let openHandler: Handler | null = null
@@ -19,15 +19,7 @@ const hostDirty = (dirty: boolean) => { if (dirty === lastDirty) return; lastDir
 const params = new URLSearchParams(location.search)
 const docName = params.get('doc')
 const lastSave: { name: string; bytes: Uint8Array | null; url: string | null } = { name: '', bytes: null, url: null }
-let fontManifest: Promise<FontMetricsManifest | null> | null = null
-const loadFontManifest = () =>
-  (fontManifest ??= fetch(new URL('font-metrics.json', document.baseURI))
-    .then((res) => (res.ok ? res.json() : null))
-    .then((value: unknown) => (isFontMetricsManifest(value) ? value : null))
-    .catch(() => null))
-async function fontMetrics(family: string) {
-  const manifest = await loadFontManifest()
-  if (manifest) return fontMetricsFor(manifest, family)
+async function devFontMetrics(family: string) {
   const res = await fetch(`/__font-metrics?family=${encodeURIComponent(family)}`)
   return res.ok ? res.json() : null
 }
@@ -81,7 +73,8 @@ const known: Record<string, unknown> = {
   consumeNewBlankDoc: async () => !docName,
   consumeAiDocContent: async () => null,
   consumeHeadlessExport: async () => null,
-  fontMetrics,
+  // undefined, not a stub: the Proxy below would otherwise answer with a function that resolves to nothing
+  fontMetrics: import.meta.env.DEV ? devFontMetrics : undefined,
   // File > Open
   openDocx: async () => { const f = await pickFile(); return f ? fileResult(f) : null },
   openDocxPath: async (path: string) => sampleResult(path.split('/').pop()!.replace(/\.docx$/, '')),
