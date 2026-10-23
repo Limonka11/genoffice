@@ -91,10 +91,11 @@ export function resetMarkers(view: EditorView) {
   dispatchMeta(view, { reset: true })
 }
 
-/** make the marker current and scroll its node to the middle of the view; false when no decoration carries the id */
+/** make the marker current and scroll its node to the middle of the view; false when no decoration carries
+ *  the id (a node shared by several slots carries all of them) */
 export function scrollToMarker(view: EditorView, id: string) {
   const set = markersKey.getState(view.state)?.set
-  const [decoration] = set?.find(undefined, undefined, (spec) => spec.slotId === id) ?? []
+  const [decoration] = set?.find(undefined, undefined, (spec) => spec.slotIds.includes(id)) ?? []
   if (!decoration) return false
   setCurrent(view, id)
   const dom = view.nodeDOM(decoration.from)

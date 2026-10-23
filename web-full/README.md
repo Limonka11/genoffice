@@ -58,9 +58,13 @@ unsaved (`embeddedSave.ts`), because every `vound:saved` becomes a published rev
 The host highlights document paragraphs with `vound:markers`. A marker names its paragraph by the
 source paragraph index: the position of the `w:p` among all elements with local name `p` in the opened
 file's `word/document.xml`, in document order (`mc:Fallback`, comments and CDATA excluded). The engine
-stamps that index on every paragraph it models (`docxPara`, DOM `data-src-p`), and `markers.ts` turns
-each marker into a node decoration on the one node carrying it, or on the table cell around it for
-`scope: 'cell'`. An index that matches no node or more than one (a split copies the index to both
+stamps that index on every paragraph it models (`docxPara`, DOM `data-src-p`), and `markers.ts` puts
+each marker on the one node carrying it, or on the table cell around it for `scope: 'cell'`. Every
+marked node gets one node decoration, also when several slots share it ("Ort: ___ Datum: ___" is one
+paragraph with two slots): `data-vound-slot` lists all of its ids separated by spaces (select one with
+`[data-vound-slot~="<id>"]`), the class carries the tone that needs attention most (rejected, gap,
+refused, conditional, proposed, accepted, in that order), and the node is current when any of its ids
+is. An index that matches no node or more than one (a split copies the index to both
 halves) is dropped and logged with `console.info('[vound] markers dropped', ids)`; so is a cell marker
 outside a table cell. Paragraphs of nested tables are not editor nodes and cannot be marked.
 
@@ -70,7 +74,7 @@ change dropped a decoration, or while markers wait for their document. The wait 
 build that sees nodes with source indices, so markers that all miss a loaded document do not cost a
 walk per edit. Markers sent before the app handed over its editor (`hostEditorHandle` in
 `vite.config.ts`) are applied when it does. `vound:scrollTo` and `vound:focus` add
-`vound-slot-current`; `host.css` holds the six tone colours.
+`vound-slot-current`, and `vound:scrollTo` finds a shared node by any of its ids; `host.css` holds the six tone colours.
 
 An explicit save seals the markers: `embeddedSave.ts` clears them before it posts `vound:saved`, and the
 editor ignores `vound:markers` and `vound:focus` until the next `vound:open`. After a save the app

@@ -4,7 +4,13 @@ import { Schema, type Node as PmNode } from '@tiptap/pm/model'
 export const schema = new Schema({
   nodes: {
     doc: { content: 'block+' },
-    docParagraph: { group: 'block', content: 'text*', attrs: { docxPara: { default: null }, align: { default: null } } },
+    docParagraph: {
+      group: 'block',
+      content: 'text*',
+      attrs: { docxPara: { default: null }, align: { default: null } },
+      // only scrollToMarker.test.ts renders a view
+      toDOM: () => ['p', 0],
+    },
     docProtected: { group: 'block', atom: true, attrs: { docxPara: { default: null } } },
     docTable: { group: 'block', content: 'docTableRow+' },
     docTableRow: { content: 'docTableCell+' },

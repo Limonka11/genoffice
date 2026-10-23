@@ -2,12 +2,16 @@
 // view, so the matching rules are tested on a bare document (markersPlugin.ts applies them).
 import type { Node as PmNode } from '@tiptap/pm/model'
 import { Decoration } from '@tiptap/pm/view'
-import type { SlotMarker } from './embed-protocol'
+import type { MarkerTone, SlotMarker } from './embed-protocol'
 
 export const MARKER_CLASS = 'vound-slot'
 export const CURRENT_CLASS = 'vound-slot-current'
 
 const cellTypes = ['docTableCell', 'docTableHeader']
+
+/** the tone a node shows when several slots share it: the one that needs attention most comes first */
+const tonePriority: MarkerTone[] = ['rejected', 'gap', 'refused', 'conditional', 'proposed', 'accepted']
+const attentionRank = (marker: SlotMarker) => tonePriority.indexOf(marker.tone)
 
 type Located = { pos: number; node: PmNode }
 
@@ -50,28 +54,36 @@ function markerTarget(doc: PmNode, marker: SlotMarker, matches: Located[]) {
   return marker.scope === 'cell' ? enclosingCell(doc, matches[0].pos) : matches[0]
 }
 
-/** node decorations for the markers; `dropped` lists ids whose index matches no node or more than one,
- *  or whose cell scope finds no enclosing docTableCell/docTableHeader */
+/** one node decoration for every slot on the node: "Ort: ___ Datum: ___" is one paragraph with two
+ *  slots. It shows the tone that needs attention most, lists every id in data-vound-slot (space separated,
+ *  CSS `~=` matches one) and in its spec, and is current when any of its ids is */
+function nodeDecoration(target: Located, markers: SlotMarker[], currentId: string | null) {
+  const slotIds = markers.map((marker) => marker.id)
+  const shown = markers.reduce((top, marker) => (attentionRank(marker) < attentionRank(top) ? marker : top))
+  const current = currentId !== null && slotIds.includes(currentId) ? ` ${CURRENT_CLASS}` : ''
+  return Decoration.node(
+    target.pos,
+    target.pos + target.node.nodeSize,
+    { class: `${MARKER_CLASS} ${MARKER_CLASS}-${shown.tone}${current}`, 'data-vound-slot': slotIds.join(' ') },
+    { slotIds },
+  )
+}
+
+/** node decorations for the markers, one per marked node; `dropped` lists ids whose index matches no node
+ *  or more than one, or whose cell scope finds no enclosing docTableCell/docTableHeader */
 export function markerDecorations(doc: PmNode, markers: SlotMarker[], currentId: string | null) {
-  const decorations: Decoration[] = []
   const dropped: string[] = []
-  if (markers.length === 0) return { decorations, dropped }
+  if (markers.length === 0) return { decorations: [], dropped }
   const found = nodesByIndex(doc, new Set(markers.map((marker) => marker.paragraph)))
+  const byNode = new Map<number, { target: Located; markers: SlotMarker[] }>()
   for (const marker of markers) {
     const target = markerTarget(doc, marker, found.get(marker.paragraph) ?? [])
     if (!target) {
       dropped.push(marker.id)
       continue
     }
-    const current = marker.id === currentId ? ` ${CURRENT_CLASS}` : ''
-    decorations.push(
-      Decoration.node(
-        target.pos,
-        target.pos + target.node.nodeSize,
-        { class: `${MARKER_CLASS} ${MARKER_CLASS}-${marker.tone}${current}`, 'data-vound-slot': marker.id },
-        { slotId: marker.id },
-      ),
-    )
+    byNode.set(target.pos, { target, markers: [...(byNode.get(target.pos)?.markers ?? []), marker] })
   }
+  const decorations = [...byNode.values()].map((group) => nodeDecoration(group.target, group.markers, currentId))
   return { decorations, dropped }
 }

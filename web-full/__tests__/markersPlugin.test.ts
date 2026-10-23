@@ -12,7 +12,7 @@ const initialState = () => stateWith(para(null))
 const apply = (state: EditorState, edit: (tr: Transaction) => Transaction) => state.apply(edit(state.tr))
 const withMeta = (state: EditorState, meta: object) => apply(state, (tr) => tr.setMeta(markersKey, meta))
 const decorated = (state: EditorState) =>
-  markersKey.getState(state)!.set.find().map((d) => ({ id: d.spec.slotId, from: d.from, to: d.to }))
+  markersKey.getState(state)!.set.find().map((d) => ({ id: d.spec.slotIds.join(' '), from: d.from, to: d.to }))
 const replaceDocument = (state: EditorState, blocks: ReturnType<typeof para>[]) =>
   apply(state, (tr) => tr.replaceWith(0, tr.doc.content.size, blocks))
 

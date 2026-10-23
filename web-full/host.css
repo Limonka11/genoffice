@@ -19,8 +19,8 @@ html.vound-embedded .autosave-toggle { display: none !important; }
 html.vound-embedded .ribbon-group:has(.ai-entry):not(:has(.ribbon-group-items > :not(.ai-entry))) { display: none !important; }
 html.vound-embedded .ai-entry { display: none !important; }
 html.vound-embedded .rb-big:has(.ai-feature-icon) { display: none !important; }
-/* Slot markers from the host (markersPlugin.ts): node decorations on a paragraph or a table cell, one tone
-   each. View only: decorations never reach the saved document. Fill at 28 % alpha (47), outline at 90 % (E6). */
+/* Slot markers from the host (markersPlugin.ts): one node decoration per marked paragraph or table cell,
+   one tone class (markers.ts picks the tone that needs attention most when slots share a node). View only: decorations never reach the saved document. Fill at 28 % alpha (47), outline at 90 % (E6). */
 .vound-slot { background: #E9D5FF47; outline: 2px solid #E9D5FFE6; outline-offset: 1px; border-radius: 2px; }
 .vound-slot-proposed { background: #E9D5FF47; outline-color: #E9D5FFE6; }
 .vound-slot-gap { background: #FDE68A47; outline-color: #FDE68AE6; }
