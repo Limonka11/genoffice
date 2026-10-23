@@ -10,7 +10,7 @@ import type { Editor } from '@tiptap/core'
 import { isEmbedded, type EditorToHost, type SlotMarker } from './embed-protocol'
 import { acceptsHostMessage, readHostMessage } from './embedMessages'
 import { embeddedSave } from './embeddedSave'
-import { markersKey, markersPlugin, scrollToMarker, sealMarkers, setCurrent, setMarkers, unsealMarkers } from './markersPlugin'
+import { markersKey, markersPlugin, scrollToMarker, sealMarkers, setCurrent, setMarkers, resetMarkers } from './markersPlugin'
 type Handler = (...args: unknown[]) => void
 const calls: string[] = []
 let openHandler: Handler | null = null
@@ -126,7 +126,7 @@ export function installDesktopShim() {
       if (!msg) return
       switch (msg.type) {
         case 'vound:open': {
-          if (hostEditor) unsealMarkers(hostEditor.view)
+          if (hostEditor) resetMarkers(hostEditor.view)
           const file = new File([msg.bytes], msg.name.endsWith('.docx') ? msg.name : `${msg.name}.docx`)
           if (openHandler) openHandler(fileResult(file))
           else toHost({ type: 'vound:error', message: 'editor not ready for open yet' })

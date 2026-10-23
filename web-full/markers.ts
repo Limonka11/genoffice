@@ -23,6 +23,17 @@ function nodesByIndex(doc: PmNode, wanted: Set<number>) {
   return found
 }
 
+/** whether any node carries a source paragraph index: a parsed document does, the editor's initial
+ *  content and a new blank document do not */
+export function hasSourceIndices(doc: PmNode) {
+  let found = false
+  doc.descendants((node) => {
+    if (typeof node.attrs.docxPara === 'number') found = true
+    return !found && !node.isTextblock
+  })
+  return found
+}
+
 function enclosingCell(doc: PmNode, pos: number): Located | null {
   const $pos = doc.resolve(pos)
   for (let depth = $pos.depth; depth > 0; depth--) {

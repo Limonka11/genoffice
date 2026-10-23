@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EditorState, type Transaction } from '@tiptap/pm/state'
+import { DecorationSet } from '@tiptap/pm/view'
 import type { SlotMarker } from '../embed-protocol'
 import { markersKey, markersPlugin } from '../markersPlugin'
 import { doc, para, paragraphs, schema } from './markerSchema'
@@ -76,7 +77,22 @@ describe('markersPlugin', () => {
     expect(decorated(state)).toEqual([])
   })
 
-  it('sealed: markers and current metas are ignored until unseal', () => {
+  it('does not walk the document per edit when every marker missed a stamped document', () => {
+    // all indices stale or in nested tables: nothing is placed, but the document carries source indices
+    let state = withMeta(stateWith(...paragraphs(0, 3)), { markers: [marker('stale', 40), marker('nested', 41)] })
+    expect(decorated(state)).toEqual([])
+    expect(markersKey.getState(state)!.placedOnce).toBe(true)
+    info.mockClear()
+    state = apply(state, (tr) => tr.insertText('typed', 1))
+    expect(info).not.toHaveBeenCalled()
+  })
+
+  it('keeps waiting while the document carries no source indices', () => {
+    const state = withMeta(initialState(), { markers: [marker('s0', 0)] })
+    expect(markersKey.getState(state)!.placedOnce).toBe(false)
+  })
+
+  it('sealed: markers and current metas are ignored until an open resets everything', () => {
     let state = withMeta(stateWith(...paragraphs(0, 3)), { markers: [marker('s0', 0), marker('s2', 2)] })
     state = withMeta(state, { current: 's2' })
     expect(markersKey.getState(state)!.current).toBe('s2')
@@ -91,9 +107,26 @@ describe('markersPlugin', () => {
     expect(markersKey.getState(state)).toMatchObject({ markers: [], current: null, sealed: true })
     expect(decorated(state)).toEqual([])
 
-    state = withMeta(state, { unseal: true })
-    expect(markersKey.getState(state)!.sealed).toBe(false)
+    // vound:open
+    state = withMeta(state, { reset: true })
+    expect(markersKey.getState(state)).toEqual({ markers: [], current: null, sealed: false, placedOnce: false, set: DecorationSet.empty })
     state = withMeta(state, { markers: [marker('s1', 1)] })
     expect(decorated(state).map((d) => d.id)).toEqual(['s1'])
+  })
+
+  it('an open drops the previous document\'s markers before the new document lands', () => {
+    let state = withMeta(stateWith(...paragraphs(0, 3)), { markers: [marker('old', 1)] })
+    state = withMeta(state, { current: 'old' })
+    expect(decorated(state).map((d) => d.id)).toEqual(['old'])
+
+    state = withMeta(state, { reset: true })
+    // the next document replaces the content with a different block count: nothing of the old markers comes back
+    state = replaceDocument(state, paragraphs(0, 5))
+    expect(decorated(state)).toEqual([])
+    expect(markersKey.getState(state)).toMatchObject({ markers: [], current: null })
+
+    // markers the host posts after the open still apply
+    state = withMeta(state, { markers: [marker('new', 4)] })
+    expect(decorated(state).map((d) => d.id)).toEqual(['new'])
   })
 })
