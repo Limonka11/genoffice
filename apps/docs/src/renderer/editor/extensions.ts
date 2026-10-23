@@ -266,8 +266,10 @@ export * from './decoration-extensions'
 
 const anchorAttrs = {
   docxIndex: { default: null as number | null },
-  /** source paragraph index (Block.sourceParaIndex): this paragraph's w:p among all
-   *  paragraphs of the original document.xml; null for paragraphs made in the editor */
+  /** source paragraph index (Block.sourceParaIndex) of the paragraph the engine
+   *  parsed: its w:p among all paragraphs of the original document.xml. A split
+   *  copies it to the new half (an index two nodes share is never marked);
+   *  paragraphs created from scratch carry null */
   docxPara: { default: null as number | null },
   /** JSON of the table-style paragraph properties (convert.ts tableStyleParaAttr); display only */
   tblPara: { default: null as string | null },

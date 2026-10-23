@@ -171,18 +171,22 @@ describe('source paragraph index', () => {
       '<v:textbox><w:txbxContent><w:p><w:r><w:t>fallback</w:t></w:r></w:p></w:txbxContent></v:textbox>' +
       '</v:rect></w:pict></mc:Fallback></mc:AlternateContent>'
     const body =
-      P('a') +
+      P('opening') +
       '<!-- <w:p><w:r><w:t>commented</w:t></w:r></w:p> -->' +
       `<w:p><w:r><w:t>shape host</w:t></w:r><w:r>${alternate}</w:r></w:p>` +
       '<w:p><w:r><w:t><![CDATA[<w:p/>cdata]]></w:t></w:r></w:p>' +
-      P('c')
+      P('closing')
     const doc = await parseDocx(await buildDocx({ bodyXml: body }))
-    expect(blockWithText(doc.blocks, 'a')!.sourceParaIndex).toBe(0)
-    const host = visible(doc.blocks).find((b) => b.sourceParaIndex === 1)
-    expect(host).toBeDefined()
-    expect(blockWithText(doc.blocks, 'cdata')!.sourceParaIndex).toBe(2)
-    expect(blockWithText(doc.blocks, 'c')).toBeDefined()
-    expect(visible(doc.blocks).at(-1)!.sourceParaIndex).toBe(3)
+    const blocks = visible(doc.blocks)
+    expect(blocks).toHaveLength(4)
+    expect(blocks.map((b) => b.runs?.map((r) => r.text).join(''))).toEqual([
+      'opening',
+      'shape host',
+      '<w:p/>cdata',
+      'closing',
+    ])
+    // the commented paragraph and the fallback box paragraph are not counted
+    expect(blocks.map((b) => b.sourceParaIndex)).toEqual([0, 1, 2, 3])
   })
 
   it('stamps nothing for an altChunk expansion', async () => {

@@ -2,11 +2,15 @@
  * rendered as data-src-p): top-level paragraphs, cell paragraphs and protected
  * blocks. A paragraph the user inserts has none. */
 import { Editor, type JSONContent } from '@tiptap/core'
-import { parseDocx } from '@genoffice/docx-engine'
+import { TextSelection } from '@tiptap/pm/state'
+import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
+import JSZip from 'jszip'
+import { parseDocx, saveDocx } from '@genoffice/docx-engine'
 import { describe, expect, it } from 'vitest'
 import { buildDocx } from '../../../packages/docx-engine/tests/helpers/build-docx'
-import { blocksToPmDoc } from '../src/renderer/editor/convert'
+import { blocksToPmDoc, pmDocToSavePlan, type PmNode } from '../src/renderer/editor/convert'
 import { editorExtensions } from '../src/renderer/editor/extensions'
+import { splitGridCell } from '../src/renderer/editor/table-ops'
 
 ;(globalThis as { CSS?: unknown }).CSS ??= { escape: (s: string) => s }
 
@@ -38,8 +42,8 @@ function paragraphLevelNodes(node: JSONContent, out: JSONContent[] = []): JSONCo
   return out
 }
 
-async function open() {
-  const parsed = await parseDocx(await buildDocx({ bodyXml: BODY, withNumbering: true }))
+async function open(bytes?: Uint8Array) {
+  const parsed = await parseDocx(bytes ?? (await buildDocx({ bodyXml: BODY, withNumbering: true })))
   const editor = new Editor({
     element: document.createElement('div'),
     extensions: editorExtensions,
@@ -91,4 +95,89 @@ describe('docxPara: the source paragraph index on editor nodes', () => {
     expect(editor.view.dom.querySelector('p')?.hasAttribute('data-src-p')).toBe(false)
     editor.destroy()
   })
+})
+
+/** position and node of the first textblock whose text is `text` */
+function textblockWithText(editor: Editor, text: string): { node: ProseMirrorNode; pos: number } {
+  let found: { node: ProseMirrorNode; pos: number } | null = null
+  editor.state.doc.descendants((node, pos) => {
+    if (found) return false
+    if (node.isTextblock && node.textContent === text) found = { node, pos }
+    return !found
+  })
+  if (!found) throw new Error(`no paragraph with text ${text}`)
+  return found
+}
+
+function nodesWithDocxPara(editor: Editor, index: number): string[] {
+  const texts: string[] = []
+  editor.state.doc.descendants((node) => {
+    if (node.attrs.docxPara === index) texts.push(node.textContent)
+  })
+  return texts
+}
+
+describe('docxPara on paragraphs the editor makes from stamped ones', () => {
+  it('a split copies the index to both halves (a shared index is never marked)', async () => {
+    const { editor } = await open()
+    const { pos } = textblockWithText(editor, 'last')
+    editor.view.dispatch(
+      editor.state.tr.setSelection(TextSelection.create(editor.state.doc, pos + 1 + 2)),
+    )
+    expect(editor.commands.splitBlock()).toBe(true)
+    expect(nodesWithDocxPara(editor, 7)).toEqual(['la', 'st'])
+    editor.destroy()
+  })
+
+  it('a blank cell paragraph made from a stamped template cell carries null', async () => {
+    const { editor } = await open()
+    let table: ProseMirrorNode | null = null
+    editor.state.doc.forEach((node) => {
+      if (!table && node.type.name === 'docTable') table = node
+    })
+    const template = table!.child(0).child(0).firstChild!
+    expect(template.attrs.docxPara).toBe(1)
+    const result = splitGridCell(table!, { row: 0, col: 0 }, 1, 2)!
+    const blank = result.table.child(0).child(1).firstChild!
+    expect(blank.type.name).toBe('docParagraph')
+    expect(blank.textContent).toBe('')
+    expect(blank.attrs.docxIndex).toBeNull()
+    expect(blank.attrs.docxPara).toBeNull()
+    editor.destroy()
+  })
+})
+
+describe('saving an edited document through the editor', () => {
+  const documentXmlOf = async (bytes: Uint8Array) =>
+    (await JSZip.loadAsync(bytes)).file('word/document.xml')!.async('string')
+  const COUNTED = [/<w:highlight[\s>/]/g, /<w:shd[\s>/]/g, /<w:bookmarkStart[\s>/]/g]
+
+  for (const target of ['last', 'r0c0']) {
+    it(`writes no marker name and no new decoration after editing "${target}"`, async () => {
+      const bytes = await buildDocx({ bodyXml: BODY, withNumbering: true })
+      const { parsed, editor } = await open(bytes)
+      const { node, pos } = textblockWithText(editor, target)
+      expect(node.attrs.docxPara).toEqual(expect.any(Number))
+      editor.view.dispatch(
+        editor.state.tr
+          .setSelection(TextSelection.create(editor.state.doc, pos + 1))
+          .insertText('edited '),
+      )
+      const plan = pmDocToSavePlan(editor.getJSON() as PmNode, parsed.blocks)
+      expect(plan.changedCount).toBeGreaterThan(0)
+      const saved = await saveDocx(parsed, plan.saveBlocks)
+      editor.destroy()
+
+      const sourceXml = await documentXmlOf(bytes)
+      const savedXml = await documentXmlOf(saved)
+      expect(savedXml).toContain(`edited ${target}`)
+      for (const name of ['sourceParaIndex', 'docxPara', 'data-src-p']) {
+        expect(savedXml).not.toContain(name)
+      }
+      for (const pattern of COUNTED) {
+        expect(savedXml.match(pattern)?.length ?? 0).toBe(sourceXml.match(pattern)?.length ?? 0)
+      }
+      expect((await JSZip.loadAsync(saved)).file('word/comments.xml')).toBeNull()
+    })
+  }
 })

@@ -98,7 +98,9 @@ function buildTable(
 function blankCellContent(schema: Schema, like: PmNode): Fragment | PmNode {
   const first = like.firstChild
   const attrs =
-    first?.type.name === 'docParagraph' ? { ...first.attrs, docxIndex: null } : { docxIndex: null }
+    first?.type.name === 'docParagraph'
+      ? { ...first.attrs, docxIndex: null, docxPara: null }
+      : { docxIndex: null }
   return schema.nodes.docParagraph.create(attrs)
 }
 
