@@ -29,3 +29,13 @@ html.vound-embedded .rb-big:has(.ai-feature-icon) { display: none !important; }
 .vound-slot-accepted { background: #1BF5A347; outline-color: #1BF5A3E6; }
 .vound-slot-rejected { background: #F53C1B47; outline-color: #F53C1BE6; }
 .vound-slot-current { outline-width: 3px; outline-offset: 2px; box-shadow: 0 0 0 4px #0B5FFF40; }
+/* Review mode (reviewMode.ts sets html.vound-review on a vound:open with mode 'review'): the host's floating
+   bar takes the place of the ribbon. No ribbon, no ribbon tab row, no status bar, no paste-options chip (its
+   choices re-apply source formatting); the page starts below the host's bar. One rule per selector. Screen
+   only: printing keeps the app's own print layout. */
+html.vound-review { --vound-review-top: 52px; }
+html.vound-review .ribbon { display: none !important; }
+html.vound-review .ribbon-tabs { display: none !important; }
+html.vound-review .status-bar { display: none !important; }
+html.vound-review .paste-chip { display: none !important; }
+@media screen { html.vound-review .editor-scroll { padding-top: var(--vound-review-top) !important; } }

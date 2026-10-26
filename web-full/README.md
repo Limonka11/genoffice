@@ -28,15 +28,21 @@ is `embed-protocol.ts`:
 
 | direction | message |
 |---|---|
-| host → editor | `{ type: 'vound:open', name, bytes: ArrayBuffer }` open a document (transfer the buffer) |
+| host → editor | `{ type: 'vound:open', name, bytes: ArrayBuffer, mode?: 'review' }` open a document (transfer the buffer); `mode: 'review'` opens it in review mode, any other mode or none in the normal editor |
 | host → editor | `{ type: 'vound:command', command: 'save' }` save now, the same path as ⌘S |
-| host → editor | `{ type: 'vound:markers', markers: SlotMarker[] }` replace all slot markers (`{ id, paragraph, scope: 'paragraph' \| 'cell', tone }`) |
+| host → editor | `{ type: 'vound:markers', markers: SlotMarker[] }` replace all slot markers (`{ id, paragraph, scope: 'paragraph' \| 'cell', tone, label, actions }`; `actions` ⊂ `accept`, `reject`, `fill`, `ask`, `restore`; without them a marker gets `label: id`, `actions: []`) |
 | host → editor | `{ type: 'vound:scrollTo', id }` scroll a marker to the middle of the view and make it current |
 | host → editor | `{ type: 'vound:focus', id: string \| null }` make a marker current without scrolling, or none |
+| host → editor | `{ type: 'vound:setFieldValue', requestId, block: BlockRef, previous, value }` replace a field's value in one block (`BlockRef = { paragraph, scope: 'paragraph' \| 'cell' }`, named like a marker); answered with `vound:fieldValueResult` |
+| host → editor | `{ type: 'vound:placeCaret', block: BlockRef }` put the caret at the end of the block's text |
 | editor → host | `{ type: 'vound:ready' }` after the editor subscribed to open requests |
 | editor → host | `{ type: 'vound:saved', name, bytes: ArrayBuffer }` on every save (⌘S, File › Save, the save command) |
 | editor → host | `{ type: 'vound:dirty', dirty: boolean }` when unsaved changes appear or a save clears them |
 | editor → host | `{ type: 'vound:error', message }` open or save failed |
+| editor → host | `{ type: 'vound:fieldAction', id, action }` a field chip's button was pressed (`id` is the slot id) |
+| editor → host | `{ type: 'vound:blockEdited', ids }` a user edit changed the text of a marked block; `ids` are its slot ids |
+| editor → host | `{ type: 'vound:caretBlock', ids, leftWith? }` the caret entered a marked block, or left one (`ids: []`, `leftWith: 'Tab' \| 'other'`) |
+| editor → host | `{ type: 'vound:fieldValueResult', requestId, ok, reason? }` the answer to `vound:setFieldValue` (`reason`: `absent`, `ambiguous`, `notEditable`, `noBlock`) |
 
 Host and editor must share one origin. The editor accepts a message only when `event.origin` is its
 own origin and `event.source` is `window.parent` (`embedMessages.ts`), reads it structurally and drops
@@ -92,6 +98,23 @@ decorations only; nothing of them is written into a saved file.
 Embedded, `boot.ts` sets `html.vound-embedded` and `host.css` hides the Genspark AI dock, the ribbon's
 AI commands (the Genspark AI group, Editor, Translate, AI Resolve Comments, AI Revision Summary) and the
 AutoSave toggle; the page area takes the full width.
+
+## Review mode
+
+`vound:open` with `mode: 'review'` opens the document in review mode (`reviewMode.ts`): the host shows
+its own bar, and the editor works like a text field. `host.css` hides the ribbon, its tab row, the
+status bar and the paste-options chip under `html.vound-review`, and pads the top of the page scroll
+container (`.editor-scroll`) by `--vound-review-top` (52px) for the host's bar. Typing, deleting, keyboard
+undo/redo and keyboard selection work as usual. Paste inserts the clipboard's plain text in the
+formatting of the insertion point; paragraphs of the pasted text are joined with a line feed inside the
+one paragraph, so a paste never adds paragraphs. The plugin takes the paste DOM event, because the app's
+own paste handlers are direct editor props that ProseMirror asks before any plugin; a paste that skips
+the event (`view.pasteHTML`) reaches its `handlePaste`. ⌘B, ⌘I, ⌘U and the alignment shortcuts ⌘E, ⌘L,
+⌘R, ⌘J (Ctrl on Windows) do nothing; the plugin sits ahead of the editor's keymaps.
+
+A review-mode open that arrives before the app handed over its editor takes effect at the hand-over.
+An open without `mode: 'review'` leaves review mode. The parser accepts `vound:setFieldValue` and
+`vound:placeCaret`; the editor does not act on them yet.
 
 ## Develop
 

@@ -6,11 +6,14 @@
 // window.desktop.fontMetrics as no installed-font index).
 // Markers: the app hands over its editor (vite.config.ts, hostEditorHandle); the shim registers the
 // markers plugin on it and routes vound:markers, vound:scrollTo and vound:focus to it.
+// Review mode: vound:open with mode 'review' puts the handed-over editor in review mode (reviewMode.ts);
+// an open without it leaves review mode.
 import type { Editor } from '@tiptap/core'
 import { isEmbedded, type EditorToHost, type SlotMarker } from './embed-protocol'
 import { acceptsHostMessage, readHostMessage } from './embedMessages'
 import { embeddedSave } from './embeddedSave'
 import { markersKey, markersPlugin, scrollToMarker, sealMarkers, setCurrent, setMarkers, resetMarkers } from './markersPlugin'
+import { enterReviewMode, leaveReviewMode } from './reviewMode'
 type Handler = (...args: unknown[]) => void
 const calls: string[] = []
 let openHandler: Handler | null = null
@@ -18,6 +21,9 @@ let menuHandler: Handler | null = null
 let hostEditor: Editor | null = null
 /** markers that arrived before the app handed over its editor */
 let pendingMarkers: SlotMarker[] | null = null
+/** the mode of the last vound:open; applied when the app hands over its editor if the open came first */
+let reviewMode = false
+const applyMode = (editor: Editor) => (reviewMode ? enterReviewMode(editor) : leaveReviewMode(editor))
 const embedded = isEmbedded()
 // same-origin only: the host and the editor are served from one origin (embed-protocol.ts)
 const toHost = (msg: EditorToHost, transfer: Transferable[] = []) => { if (embedded) window.parent.postMessage(msg, window.location.origin, transfer) }
@@ -63,6 +69,7 @@ function handOverEditor(editor: Editor) {
   if (!markersKey.getState(editor.state)) editor.registerPlugin(markersPlugin)
   if (pendingMarkers) setMarkers(editor.view, pendingMarkers)
   pendingMarkers = null
+  applyMode(editor)
 }
 const known: Record<string, unknown> = {
   getLanguage: async () => 'en',
@@ -126,7 +133,8 @@ export function installDesktopShim() {
       if (!msg) return
       switch (msg.type) {
         case 'vound:open': {
-          if (hostEditor) resetMarkers(hostEditor.view)
+          reviewMode = msg.mode === 'review'
+          if (hostEditor) { resetMarkers(hostEditor.view); applyMode(hostEditor) }
           const file = new File([msg.bytes], msg.name.endsWith('.docx') ? msg.name : `${msg.name}.docx`)
           if (openHandler) openHandler(fileResult(file))
           else toHost({ type: 'vound:error', message: 'editor not ready for open yet' })

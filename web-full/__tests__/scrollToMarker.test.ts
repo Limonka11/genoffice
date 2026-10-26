@@ -6,7 +6,7 @@ import type { SlotMarker } from '../embed-protocol'
 import { markersKey, markersPlugin, scrollToMarker, setMarkers } from '../markersPlugin'
 import { doc, paragraphs, schema } from './markerSchema'
 
-const marker = (id: string, paragraph: number, tone: SlotMarker['tone']): SlotMarker => ({ id, paragraph, scope: 'paragraph', tone })
+const marker = (id: string, paragraph: number, tone: SlotMarker['tone']): SlotMarker => ({ id, paragraph, scope: 'paragraph', tone, label: id, actions: [] })
 
 let view: EditorView | null = null
 afterEach(() => view?.destroy())

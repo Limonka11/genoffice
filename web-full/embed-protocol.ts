@@ -1,14 +1,23 @@
 /**
  * postMessage contract between a host page (the Vound app) and this iframe.
- * Host → iframe:   { type: 'vound:open', name: string, bytes: ArrayBuffer }   open a document
+ * Host → iframe:   { type: 'vound:open', name: string, bytes: ArrayBuffer, mode?: 'review' }   open a document;
+ *                                                                               'review' opens it in review mode
  *                  { type: 'vound:command', command: 'save' }                 save now (same path as ⌘S)
  *                  { type: 'vound:markers', markers: SlotMarker[] }            replace the slot markers (all of them)
  *                  { type: 'vound:scrollTo', id: string }                      scroll a marker into view and make it current
  *                  { type: 'vound:focus', id: string | null }                  make a marker current without scrolling, or none
+ *                  { type: 'vound:setFieldValue', requestId, block, previous, value }
+ *                                                                              replace a field's value in one block
+ *                  { type: 'vound:placeCaret', block: BlockRef }               caret at the end of the block's text
  * Iframe → host:   { type: 'vound:ready' }                                     the editor subscribed to open requests
  *                  { type: 'vound:saved', name: string, bytes: ArrayBuffer }   every save (⌘S, File › Save, 'save' command)
  *                  { type: 'vound:dirty', dirty: boolean }                     unsaved changes appeared or were saved; sent on change
  *                  { type: 'vound:error', message: string }                    open or save failed
+ *                  { type: 'vound:fieldAction', id, action: FieldAction }      a chip button was pressed (id = slot id)
+ *                  { type: 'vound:blockEdited', ids: string[] }                a user edit changed the text of a marked block
+ *                  { type: 'vound:caretBlock', ids: string[], leftWith? }      the caret entered a marked block, or left
+ *                                                                              one (ids [], leftWith 'Tab' | 'other')
+ *                  { type: 'vound:fieldValueResult', requestId, ok, reason? }  the answer to vound:setFieldValue
  *
  * Both sides check the sender. The editor accepts a message only when event.origin is its own origin
  * and event.source is window.parent (embedMessages.ts); the host should accept one only from the
@@ -16,19 +25,40 @@
  * host and editor have to be served from the same origin. Bytes travel as transferable ArrayBuffers.
  */
 export type MarkerTone = 'proposed' | 'gap' | 'conditional' | 'refused' | 'accepted' | 'rejected'
+/** What a field's chip offers; the host sends the set per field. */
+export type FieldAction = 'accept' | 'reject' | 'fill' | 'ask' | 'restore'
 /** A highlight on one paragraph of the opened document, named by its source paragraph index: the
  *  paragraph's w:p among all w:p of the original document.xml. `cell` highlights the table cell
- *  around that paragraph instead. Display only: markers never reach the saved bytes. */
-export type SlotMarker = { id: string; paragraph: number; scope: 'paragraph' | 'cell'; tone: MarkerTone }
+ *  around that paragraph instead. `label` names the field on its chip and `actions` are the chip's
+ *  buttons; a host that omits them gets `label: id` and `actions: []`. Display only: markers never
+ *  reach the saved bytes. */
+export type SlotMarker = {
+  id: string
+  paragraph: number
+  scope: 'paragraph' | 'cell'
+  tone: MarkerTone
+  label: string
+  actions: FieldAction[]
+}
+/** The block a field write or caret placement targets, named like a marker: the source paragraph
+ *  index, and whether the block is that paragraph or the table cell around it. */
+export type BlockRef = { paragraph: number; scope: 'paragraph' | 'cell' }
+export type FieldValueRefusal = 'absent' | 'ambiguous' | 'notEditable' | 'noBlock'
 export type HostToEditor =
-  | { type: 'vound:open'; name: string; bytes: ArrayBuffer }
+  | { type: 'vound:open'; name: string; bytes: ArrayBuffer; mode?: 'review' }
   | { type: 'vound:command'; command: 'save' }
   | { type: 'vound:markers'; markers: SlotMarker[] }
   | { type: 'vound:scrollTo'; id: string }
   | { type: 'vound:focus'; id: string | null }
+  | { type: 'vound:setFieldValue'; requestId: string; block: BlockRef; previous: string; value: string }
+  | { type: 'vound:placeCaret'; block: BlockRef }
 export type EditorToHost =
   | { type: 'vound:ready' }
   | { type: 'vound:saved'; name: string; bytes: ArrayBuffer }
   | { type: 'vound:dirty'; dirty: boolean }
   | { type: 'vound:error'; message: string }
+  | { type: 'vound:fieldAction'; id: string; action: FieldAction }
+  | { type: 'vound:blockEdited'; ids: string[] }
+  | { type: 'vound:caretBlock'; ids: string[]; leftWith?: 'Tab' | 'other' }
+  | { type: 'vound:fieldValueResult'; requestId: string; ok: boolean; reason?: FieldValueRefusal }
 export const isEmbedded = (): boolean => window.parent !== window

@@ -1,4 +1,5 @@
-// A minimal stand-in for the Docs schema: the node names the markers code looks for, and docxPara.
+// A minimal stand-in for the Docs schema: the node names the markers code looks for, docxPara, and the
+// run-formatting mark (docTextStyle) the review-mode paste tests read.
 import { Schema, type Node as PmNode } from '@tiptap/pm/model'
 
 export const schema = new Schema({
@@ -8,14 +9,22 @@ export const schema = new Schema({
       group: 'block',
       content: 'text*',
       attrs: { docxPara: { default: null }, align: { default: null } },
-      // only scrollToMarker.test.ts renders a view
+      // only the view tests (scrollToMarker, reviewMode) render or parse
       toDOM: () => ['p', 0],
+      parseDOM: [{ tag: 'p' }],
     },
     docProtected: { group: 'block', atom: true, attrs: { docxPara: { default: null } } },
     docTable: { group: 'block', content: 'docTableRow+' },
     docTableRow: { content: 'docTableCell+' },
     docTableCell: { content: 'docParagraph+' },
     text: {},
+  },
+  marks: {
+    docTextStyle: {
+      attrs: { bold: { default: null }, font: { default: null } },
+      toDOM: (mark) => ['span', { 'data-bold': mark.attrs.bold, 'data-font': mark.attrs.font }, 0],
+      parseDOM: [{ tag: 'b', attrs: { bold: true } }],
+    },
   },
 })
 

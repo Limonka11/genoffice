@@ -8,7 +8,7 @@ import { cell, doc, para, protectedBlock, table } from './markerSchema'
 // holding paragraph 2 at 7..10 and paragraph 3 at 10..13
 const sample = doc(para(0, 'a'), protectedBlock(1), table(cell(para(2, 'b'), para(3, 'c'))))
 const marker = (id: string, paragraph: number, scope: SlotMarker['scope'] = 'paragraph', tone: SlotMarker['tone'] = 'proposed'): SlotMarker =>
-  ({ id, paragraph, scope, tone })
+  ({ id, paragraph, scope, tone, label: id, actions: [] })
 // a node decoration keeps its DOM attrs on its (untyped) type; nothing public reads them without a view
 const attrsOf = (decoration: Decoration) => Reflect.get(Reflect.get(decoration, 'type'), 'attrs')
 const described = (decoration: Decoration) =>

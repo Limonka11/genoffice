@@ -5,7 +5,7 @@ import type { SlotMarker } from '../embed-protocol'
 import { markersKey, markersPlugin } from '../markersPlugin'
 import { doc, para, paragraphs, schema } from './markerSchema'
 
-const marker = (id: string, paragraph: number): SlotMarker => ({ id, paragraph, scope: 'paragraph', tone: 'proposed' })
+const marker = (id: string, paragraph: number): SlotMarker => ({ id, paragraph, scope: 'paragraph', tone: 'proposed', label: id, actions: [] })
 const stateWith = (...blocks: Parameters<typeof doc>) => EditorState.create({ schema, doc: doc(...blocks), plugins: [markersPlugin] })
 /** the initial content the editor mounts with before a document is opened */
 const initialState = () => stateWith(para(null))
