@@ -88,6 +88,13 @@ describe('a blank legacy text form field through the editor', () => {
     typeIntoField((shown) => `${shown}Beispiel AG`)
     expect(display().left).toBe('Beispiel AG')
 
+    // with the caret in the middle of the blank, all of it goes
+    editor.view.dispatch(editor.state.tr.setNodeMarkup(editor.state.doc.child(0).nodeSize, undefined, { ...editor.state.doc.child(1).attrs, fieldDisplay: { ...display(), left: enSpaces } }))
+    typeIntoField((shown) => `${shown.slice(0, 2)}Mitte${shown.slice(2)}`)
+    expect(display().left).toBe('Mitte')
+    typeIntoField(() => 'Beispiel AG')
+    expect(display().left).toBe('Beispiel AG')
+
     const plan = pmDocToSavePlan(editor.getJSON() as PmNode, parsed.blocks)
     editor.destroy()
     expect(fieldResult(await documentXmlOf(await saveDocx(parsed, plan.saveBlocks)))).toBe('Beispiel AG')

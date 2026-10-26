@@ -113,8 +113,8 @@ AutoSave toggle; the page area takes the full width.
 `vound:open` with `mode: 'review'` opens the document in review mode (`reviewMode.ts`): the host shows
 its own bar, and the editor works like a text field. `host.css` hides the ribbon, its tab row, the
 status bar and the paste-options chip under `html.vound-review`, and pads the top of the page scroll
-container (`.editor-scroll`) by `--vound-review-top` (52px) for the host's bar. The editor's "Saved" toast
-is hidden too (the host's bar shows the save status); error toasts still show. Typing, deleting, keyboard
+container (`.editor-scroll`) by `--vound-review-top` (52px) for the host's bar. The editor's success toasts,
+such as "Saved", are hidden too (the host's bar shows the save status); error toasts still show. Typing, deleting, keyboard
 undo/redo, clipboard shortcuts, select-all, save, find, zoom and keyboard selection work as usual.
 
 Paste inserts the clipboard's plain text in the formatting of the insertion point (`pasteText.ts`):
@@ -161,8 +161,10 @@ would replace the block, and the field with it, by plain text.
 
 Word shows an empty legacy form field as five en spaces (U+2002). Typing into such a blank replaces it
 wherever the caret sits in it: in a table cell, where the field's result is the paragraph's text, review
-mode replaces a paragraph of en spaces only with the first typed text; in a field passthrough, the editor's
-field commit drops the blank (or an empty line's placeholder NBSP) from before or after the typed text.
+mode replaces any paragraph of en spaces only with the first typed text (field paragraphs are not marked
+in the editor); in a field passthrough, the editor's
+field commit drops the blank (or an empty line's placeholder NBSP) around the typed text, also when the
+caret sat in the middle of it.
 
 ## Field chip
 

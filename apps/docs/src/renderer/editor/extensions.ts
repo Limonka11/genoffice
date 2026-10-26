@@ -6287,13 +6287,18 @@ function wireFieldEditing(
       // as the plain string (a rebuild would otherwise redraw the stale runs)
       if (next.left !== currentField.left) delete next.runs
       // an empty result shows a placeholder: one NBSP on its empty line, or
-      // Word's blank (en spaces). Typed text replaces it, and the line draws the
-      // text again (an empty line always draws the placeholder)
+      // Word's blank (en spaces). Typed text replaces all of it, wherever the
+      // caret sat in it, and the line draws the text again (an empty line
+      // always draws the placeholder)
       const previous = currentField.left ?? ''
       const placeholder = currentField.emptyLine ? '\u00a0' : previous.trim() === '' ? previous : ''
       if (placeholder && next.left && next.left !== placeholder) {
-        if (next.left.startsWith(placeholder)) next.left = next.left.slice(placeholder.length)
-        else if (next.left.endsWith(placeholder)) next.left = next.left.slice(0, -placeholder.length)
+        const blank = new Set(placeholder)
+        let from = 0
+        let to = next.left.length
+        while (from < to && blank.has(next.left[from])) from++
+        while (to > from && blank.has(next.left[to - 1])) to--
+        next.left = next.left.slice(from, to)
         delete next.emptyLine
       }
     }

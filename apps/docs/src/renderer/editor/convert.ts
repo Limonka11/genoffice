@@ -1488,9 +1488,9 @@ export function tableFormattingSignature(table: PmNode): string {
   )
 }
 
-/** the paragraph signatures of a table signature in document order, or null when the cell grid or a
- *  cell's paragraph count differs from `other` */
-function pairedParagraphSignatures(signature: string, other: string) {
+/** the cells of two table signatures side by side, in document order, or null when the cell grid or a
+ *  cell's content count differs */
+function pairedCellSignatures(signature: string, other: string) {
   const before = JSON.parse(signature)
   const after = JSON.parse(other)
   const sameShape =
@@ -1501,35 +1501,40 @@ function pairedParagraphSignatures(signature: string, other: string) {
         row.every((cell: unknown[], c: number) => cell.length === after[r][c].length),
     )
   if (!sameShape) return null
-  const flat = (grid: unknown[][][][]) => grid.flat(2)
-  const afterParagraphs = flat(after)
-  return flat(before).map((paragraph, i) => [paragraph, afterParagraphs[i]])
+  const afterCells = after.flat()
+  return before.flat().map((cell: unknown[][], i: number) => [cell, afterCells[i]])
+}
+
+/** One cell's change in paragraph signatures needs a regeneration: a paragraph's format or list changed, or
+ *  its run formatting changed where the cell text patch cannot write it. The patch writes the runs of a
+ *  paragraph whose text changed, but only in a cell made of paragraphs: it cannot rewrite the paragraphs of
+ *  a cell that also holds a nested table or text boxes, nor a picture's size, which lives in the drawing. */
+function cellNeedsRegeneration(before: unknown[][], after: unknown[][]) {
+  const onlyParagraphs = [...before, ...after].every((paragraph) => paragraph[3] !== null)
+  return before.some((paragraphBefore, i) => {
+    const [formatBefore, listBefore, inlineBefore, textBefore, pictureBefore] = paragraphBefore
+    const [formatAfter, listAfter, inlineAfter, textAfter, pictureAfter] = after[i]
+    if (JSON.stringify([formatBefore, listBefore]) !== JSON.stringify([formatAfter, listAfter])) return true
+    if (JSON.stringify(inlineBefore) === JSON.stringify(inlineAfter)) return false
+    return !onlyParagraphs || textBefore === textAfter || !!pictureBefore || !!pictureAfter
+  })
 }
 
 /**
  * Whether a table's formatting changed in a way only a regeneration of the whole table writes (the cell
- * text patch keeps paragraph formatting). A run-format difference in a paragraph whose text changed too
- * does not count: the text patch writes that paragraph's runs with their formatting, and keeps a form
- * field or content control in it (patchFieldParagraphText), which a regeneration drops along with every
- * other field of the table. Emptying a paragraph removes its runs and their marks, and text typed into
- * an emptied paragraph may come without them. A picture in the paragraph still regenerates the table:
- * its size lives in the drawing.
+ * text patch keeps paragraph formatting). A run-format difference in a paragraph whose text changed too,
+ * in a cell made of paragraphs, does not count: the text patch writes that paragraph's runs with their
+ * formatting, and keeps a form field or content control in it (patchFieldParagraphText), which a
+ * regeneration drops along with every other field of the table. Emptying a paragraph removes its runs
+ * and their marks, and text typed into an emptied paragraph may come without them.
  */
 export function tableFormattingChanged(table: PmNode): boolean {
   const original = table.attrs?.originalFormatting
   const current = tableFormattingSignature(table)
   if (original === current) return false
   if (typeof original !== 'string') return true
-  const pairs = pairedParagraphSignatures(original, current)
-  if (!pairs) return true
-  return pairs.some(([before, after]) => {
-    const [formatBefore, listBefore, inlineBefore, textBefore, pictureBefore] = before
-    const [formatAfter, listAfter, inlineAfter, textAfter, pictureAfter] = after
-    if (JSON.stringify([formatBefore, listBefore]) !== JSON.stringify([formatAfter, listAfter])) return true
-    if (JSON.stringify(inlineBefore) === JSON.stringify(inlineAfter)) return false
-    const textEdited = textBefore !== null && textAfter !== null && textBefore !== textAfter
-    return !textEdited || pictureBefore || pictureAfter
-  })
+  const cells = pairedCellSignatures(original, current)
+  return !cells || cells.some(([before, after]: unknown[][][]) => cellNeedsRegeneration(before, after))
 }
 
 function paragraphText(node: PmNode): string {
@@ -2363,6 +2368,10 @@ export function pmDocToSavePlan(inputDoc: PmNode, originalBlocks: Block[]): Save
         const structurallyUnchanged =
           node.attrs?.originalStructure === tableStructureSignature(node)
         const formattingUnchanged = !tableFormattingChanged(node)
+        const tableTexts =
+          structurallyUnchanged && formattingUnchanged
+            ? tableTextsPatchFromModel(model, original)
+            : null
         if (
           original.blockRevision &&
           !revision &&
@@ -2370,14 +2379,12 @@ export function pmDocToSavePlan(inputDoc: PmNode, originalBlocks: Block[]): Save
           formattingUnchanged &&
           original.originalXml
         ) {
+          // an accepted tracked insertion: the table without its revision wrapper, with the cell edits
+          const accepted = unwrapBlockRevisionXml(original.originalXml)
           changedCount++
-          pushBlock({ kind: 'xml', xml: unwrapBlockRevisionXml(original.originalXml) })
+          pushBlock({ kind: 'xml', xml: tableTexts ? patchTableCellTexts(accepted, tableTexts) : accepted })
           continue
         }
-        const tableTexts =
-          structurallyUnchanged && formattingUnchanged
-            ? tableTextsPatchFromModel(model, original)
-            : null
         if (structurallyUnchanged && formattingUnchanged && tableTexts && original.originalXml) {
           changedCount++
           pushBlock({ kind: 'xml', xml: patchTableCellTexts(original.originalXml, tableTexts) })

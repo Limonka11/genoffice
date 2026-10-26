@@ -39,8 +39,9 @@ function keepFieldBlock(view: EditorView, event: Event) {
 
 const deletesSelection = (event: KeyboardEvent) => event.key === 'Backspace' || event.key === 'Delete'
 
-/** Word's empty legacy form field result: a paragraph of en spaces only (a field in a table cell is a plain
- *  paragraph holding its result) */
+/** A paragraph of plain text made of en spaces only. That is how Word's empty legacy form field result shows
+ *  in a table cell (a plain paragraph holding the field's result), but the editor does not mark field
+ *  paragraphs, so any such paragraph matches: en spaces are not typed by hand. */
 function isFormFieldBlank(node: PmNode) {
   let plainText = node.childCount > 0
   node.forEach((child) => { plainText &&= child.isText })
