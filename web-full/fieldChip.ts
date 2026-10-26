@@ -2,26 +2,25 @@
 // shows a small pill in the empty gutter right of the page, vertically centred on the block, with the
 // buttons the host sent for each of the block's fields (SlotMarker.actions). A dashed tether runs at the
 // block's height across the page's right margin to the chip, starting where the page-level block around it
-// (the paragraph itself, or the whole table for a cell) ends, so neither covers document text. A block
-// holding several fields gets one labelled row per field, in the order of its data-vound-slot ids. A press
-// posts vound:fieldAction; the host decides what it does.
+// (the paragraph itself, or the whole table for a cell) ends, so neither covers document text; in a
+// multi-column section the tether is left out, the next column may lie in its way. A block holding several
+// fields gets one labelled row per field, in the order of its data-vound-slot ids. A press posts
+// vound:fieldAction; the host decides what it does.
 //
 // The chip and tether live in a zero-height layer inside the page's scroll container, so they scroll with
 // the document; a scroll or a resize hides them anyway. They stay while the pointer moves from the block to
-// the chip and hide 220ms after it left both. When the gutter is too narrow for the chip it is not shown
-// (the host's bar offers the current field's buttons then); the hover outline is. The outline is a
-// decoration (markersPlugin.ts, setHot): a class written onto the block's DOM would read as a DOM change to
-// ProseMirror.
+// the chip and hide 220ms after it left both. The chip never grows past the gutter (reviewGutter.ts, which
+// also keeps that gutter free): labels shrink or wrap above their buttons, and only a gutter narrower than
+// the buttons hides the chip (the host's bar offers the current field's buttons then); the hover outline
+// stays. The outline is a decoration (markersPlugin.ts, setHot): a class written onto the block's DOM
+// would read as a DOM change to ProseMirror.
 import type { EditorView } from '@tiptap/pm/view'
-import type { EditorToHost, FieldAction, SlotMarker } from './embed-protocol'
+import type { EditorToHost, FieldAction, MarkerTone, SlotMarker } from './embed-protocol'
 import { MARKER_CLASS } from './markers'
 import { markersKey, setHot } from './markersPlugin'
+import { chipRoom, chipRowWidth, PAGE_GAP_PX } from './reviewGutter'
 
 const HIDE_DELAY_MS = 220
-/** the chip's distance from the page's right edge */
-const PAGE_GAP_PX = 10
-/** the room the gutter needs beyond the chip's own width */
-const GUTTER_SLACK_PX = 16
 
 const BUTTONS: Record<FieldAction, { icon: string; title: string }> = {
   accept: { icon: '✓', title: 'Übernehmen' },
@@ -32,7 +31,7 @@ const BUTTONS: Record<FieldAction, { icon: string; title: string }> = {
 }
 
 /** tones of a field that still needs a value: their tether is amber */
-const MISSING_TONES = ['gap', 'conditional', 'refused']
+const MISSING_TONES: MarkerTone[] = ['gap', 'conditional', 'refused']
 
 /** the page's scroll container (App.tsx's main.editor-scroll); the editor root's parent without one */
 const scrollContainer = (view: EditorView) => view.dom.closest('.editor-scroll') ?? view.dom.parentElement
@@ -62,6 +61,16 @@ function pageLevelBlock(view: EditorView, block: Element) {
   return element
 }
 
+/** whether the block sits in a column of a multi-column section: another column may lie right of it */
+function inColumns(view: EditorView, block: Element) {
+  if (block.closest('.doc-col-block')) return true
+  const columns = Number.parseInt(view.dom.ownerDocument.defaultView?.getComputedStyle(view.dom).columnCount ?? '', 10)
+  return columns > 1
+}
+
+/** the narrowest chip for these fields: the row with the most buttons (labels shrink or wrap) */
+const narrowestChip = (fields: SlotMarker[]) => Math.max(...fields.map((marker) => chipRowWidth(marker.actions.length)))
+
 /** the document position the block's marker decoration starts at */
 function blockStart(view: EditorView, block: Element) {
   const decorations = markersKey.getState(view.state)?.set.find() ?? []
@@ -89,6 +98,8 @@ function chipRow(marker: SlotMarker, labelled: boolean) {
     const label = document.createElement('span')
     label.className = 'vound-chip-label'
     label.textContent = marker.label
+    // the label may be cut short in a narrow gutter
+    label.title = marker.label
     row.append(label)
   }
   row.append(...marker.actions.map((action) => chipButton(marker, action)))
@@ -135,13 +146,11 @@ export function mountFieldChip(view: EditorView, post: (msg: EditorToHost) => vo
     return container
   }
 
-  /** fill the chip, then show it beside the block if the gutter holds it */
+  /** fill the chip, then show it beside the block if the gutter holds it; labels shrink or wrap above
+   *  their buttons to stay inside the gutter */
   const showChip = (block: Element, fields: SlotMarker[], labelled: boolean) => {
     const container = placeLayer()
     if (!container) return hideChip()
-    chip.replaceChildren(...fields.map((marker) => chipRow(marker, labelled)))
-    chip.classList.toggle('vound-chip-rows', fields.length > 1)
-    chip.hidden = false
     const page = view.dom.getBoundingClientRect()
     const box = block.getBoundingClientRect()
     const contentRight = Math.max(box.right, pageLevelBlock(view, block).getBoundingClientRect().right)
@@ -149,7 +158,12 @@ export function mountFieldChip(view: EditorView, post: (msg: EditorToHost) => vo
     // a block wider than the page (a table running into the margin) moves the chip further out
     const anchor = Math.max(page.right, contentRight)
     const scrollbar = container instanceof HTMLElement ? container.offsetWidth - container.clientWidth : 0
-    if (bounds.right - scrollbar - anchor < chip.getBoundingClientRect().width + GUTTER_SLACK_PX) return hideChip()
+    const room = chipRoom(bounds.right - scrollbar - anchor)
+    if (room < narrowestChip(fields)) return hideChip()
+    chip.replaceChildren(...fields.map((marker) => chipRow(marker, labelled)))
+    chip.classList.toggle('vound-chip-rows', fields.length > 1)
+    chip.style.maxWidth = `${room}px`
+    chip.hidden = false
     const origin = layer.getBoundingClientRect()
     const chipLeft = anchor + PAGE_GAP_PX
     const middle = `${box.top + box.height / 2 - origin.top}px`
@@ -159,7 +173,8 @@ export function mountFieldChip(view: EditorView, post: (msg: EditorToHost) => vo
     tether.style.width = `${chipLeft - contentRight}px`
     tether.style.top = middle
     tether.classList.toggle('vound-chip-tether-missing', MISSING_TONES.some((tone) => block.classList.contains(`${MARKER_CLASS}-${tone}`)))
-    tether.hidden = false
+    // in a column the next column may lie between the block and the margin: the chip shows, the tether not
+    tether.hidden = inColumns(view, block)
   }
 
   const show = (block: Element) => {

@@ -86,6 +86,39 @@ function hostEditorHandle(): Plugin {
   }
 }
 
+// Review mode keeps a gutter right of the page for the field chip (reviewGutter.ts): the width fit fills
+// the canvas less that gutter and never zooms above 100 %. App.tsx measures the canvas in rawFitWidth
+// (the overflow clamp) and fitZoomFor (Page Width / Text Width / One Page, the fit mode that follows
+// resizes); both read the canvas width through the shim, and fitZoomFor caps its result. Outside review
+// mode the shim answers with the width and zoom unchanged.
+const fitCanvas = '(window.desktop.reviewFitWidth?.(scroller.clientWidth) ?? scroller.clientWidth)'
+const fitNeedles = [
+  { needle: 'return ((scroller.clientWidth - 48) / (', replacement: `return ((${fitCanvas} - 48) / (`, count: 1 },
+  { needle: '((scroller.clientWidth - pad) / (', replacement: `((${fitCanvas} - pad) / (`, count: 2 },
+  {
+    needle: 'return clampDocsZoom(Math.floor(next))',
+    replacement: 'return clampDocsZoom(Math.floor(window.desktop.reviewFitZoom?.(next) ?? next))',
+    count: 1,
+  },
+]
+function reviewFitZoom(): Plugin {
+  return {
+    name: 'genoffice-review-fit-zoom',
+    // on the source, before esbuild drops the parentheses the needles contain
+    enforce: 'pre',
+    transform(code, id) {
+      if (!id.endsWith('/apps/docs/src/renderer/App.tsx')) return null
+      let out = code
+      for (const { needle, replacement, count } of fitNeedles) {
+        const found = out.split(needle).length - 1
+        if (found !== count) throw new Error(`review-fit-zoom: "${needle}" found ${found} times, expected ${count}; update the transform`)
+        out = out.split(needle).join(replacement)
+      }
+      return { code: out, map: null }
+    },
+  }
+}
+
 // Spike-only fix for a GenOffice rendering bug: header/footer strips sit outside .doc-page, so runs that
 // inherit the document's default (theme) font fell back to the UI font stack. Extend the per-document
 // base font rule to the strips. Upstream candidate: apps/docs/src/renderer/doc-style-css.ts.
@@ -105,7 +138,7 @@ export default defineConfig({
   // relative asset URLs so the built host can be served under any path (e.g. /editor/)
   base: './',
   build: { outDir: resolve(__dirname, 'dist'), emptyOutDir: true, target: 'es2022' },
-  plugins: [react(), hostEndpoints(), hostDecidesEditability(), hostReportsDirty(), hostEditorHandle(), headerStripFont()],
+  plugins: [react(), hostEndpoints(), hostDecidesEditability(), hostReportsDirty(), hostEditorHandle(), reviewFitZoom(), headerStripFont()],
   resolve: {
     alias: {
       '@genoffice/docx-engine/lazy-media': resolve(root, 'packages/docx-engine/src/lazy-media.ts'),

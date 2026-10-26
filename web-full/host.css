@@ -39,6 +39,8 @@ html.vound-review .ribbon-tabs { display: none !important; }
 html.vound-review .status-bar { display: none !important; }
 html.vound-review .paste-chip { display: none !important; }
 @media screen { html.vound-review .editor-scroll { padding-top: var(--vound-review-top) !important; } }
+/* the page at the left of the canvas: all spare width lies right of it, for the field chip (reviewGutter.ts) */
+html.vound-review .doc-zoom { margin-left: 0; }
 /* Review-mode field look (spec 4.2): a soft tint and a 2px leading state bar, no outline. Proposed is violet,
    a field that still needs a value (gap, conditional, refused) amber, accepted cyan with a check after its
    text, rejected white with a rose bar and edge. The bar is a background layer and the ring a box shadow,
@@ -137,13 +139,18 @@ html.vound-review .vound-slot-hot:not(.vound-slot-current) { box-shadow: var(--v
   font: 600 12px/1 system-ui, sans-serif;
   color: var(--vound-chip-muted);
   white-space: nowrap;
+  /* the layer has no width: size to the content, up to the max-width fieldChip.ts sets from the gutter */
+  width: max-content;
+  box-sizing: border-box;
 }
 .vound-chip.vound-chip-rows { border-radius: 14px; }
-.vound-chip-row { display: flex; align-items: center; gap: 2px; }
-.vound-chip-label { max-width: 160px; overflow: hidden; text-overflow: ellipsis; padding: 0 6px 0 8px; font-weight: 500; color: var(--vound-chip-ink); }
+/* a label that does not fit beside its buttons takes a line of its own above them and is cut short */
+.vound-chip-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 2px; }
+.vound-chip-label { flex: 1 1 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; padding: 6px 6px 6px 8px; font-weight: 500; color: var(--vound-chip-ink); }
 .vound-chip-btn {
   display: grid;
   place-items: center;
+  flex: none;
   width: 24px;
   height: 24px;
   padding: 0;

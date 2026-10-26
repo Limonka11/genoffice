@@ -126,6 +126,7 @@ describe('markersPlugin', () => {
       sealed: false,
       placedOnce: false,
       awaitingDocument: true,
+      afterSave: 'idle',
       hot: null,
       set: DecorationSet.empty,
     })
@@ -169,23 +170,29 @@ describe('markersPlugin', () => {
   })
 
   it('in review mode a save does not seal and later markers apply', () => {
-    let state = withMeta(stateWith(...paragraphs(0, 5)), { markers: [marker('s1', 1), marker('s3', 3)] })
+    // the opened document has landed
+    let state = replaceDocument(stateWith(para(null)), paragraphs(0, 5))
+    state = withMeta(state, { markers: [marker('s1', 1), marker('s3', 3)] })
     state = withMeta(state, { current: 's3' })
 
-    // the saved file may number its paragraphs differently: the markers go until the host has checked it
+    // the markers stay on their nodes through the save (a clean save is never re-parsed or re-sent)
     state = withMeta(state, saveMeta('review'))
-    expect(markersKey.getState(state)).toMatchObject({ markers: [], current: 's3', sealed: false })
-    expect(decorated(state)).toEqual([])
-
-    // the host's markers arrive before the app's re-parse replaced the document; they are built again on it
-    state = withMeta(state, { markers: [marker('s1', 1), marker('s3', 3)] })
+    expect(markersKey.getState(state)).toMatchObject({ current: 's3', sealed: false, afterSave: 'awaitingReparse' })
     expect(decorated(state).map((d) => d.id)).toEqual(['s1', 's3'])
+
+    // the host checked the saved file and posts its markers before the app's re-parse replaced the
+    // document: they are built again on the re-parsed one
+    state = withMeta(state, { markers: [marker('s1', 1), marker('s3', 3)] })
     state = replaceDocument(state, paragraphs(0, 5))
     expect(decorated(state).map((d) => d.id)).toEqual(['s1', 's3'])
-    expect(markersKey.getState(state)!.current).toBe('s3')
+    expect(markersKey.getState(state)).toMatchObject({ current: 's3', afterSave: 'idle' })
 
-    // a save whose document the app keeps (no re-parse): markers posted afterwards apply directly
+    // the re-parse comes first: markers from before the save may name renumbered paragraphs, so they go;
+    // the host's markers posted afterwards apply
     state = withMeta(state, saveMeta('review'))
+    state = replaceDocument(state, paragraphs(0, 6))
+    expect(decorated(state)).toEqual([])
+    expect(markersKey.getState(state)!.current).toBe('s3')
     state = withMeta(state, { markers: [marker('s2', 2)] })
     expect(decorated(state).map((d) => d.id)).toEqual(['s2'])
 
@@ -193,6 +200,20 @@ describe('markersPlugin', () => {
     state = withMeta(state, saveMeta('plain'))
     state = withMeta(state, { markers: [marker('s2', 2)] })
     expect(markersKey.getState(state)!.sealed).toBe(true)
+    expect(decorated(state)).toEqual([])
+  })
+
+  it('after a review-mode save that the app does not re-parse, a later whole-document replace clears the markers', () => {
+    let state = replaceDocument(stateWith(para(null)), paragraphs(0, 5))
+    state = withMeta(state, { markers: [marker('s1', 1)] })
+    state = withMeta(state, saveMeta('review'))
+    state = withMeta(state, { markers: [marker('s1', 1)] })
+    // the reviewer typed on: the app re-parses only a document it still holds unchanged, so none follows
+    state = apply(state, (tr) => tr.insertText('typed', 1))
+    expect(markersKey.getState(state)!.afterSave).toBe('idle')
+    expect(decorated(state).map((d) => d.id)).toEqual(['s1'])
+    // a select-all that replaces everything is not that re-parse: the markers go, as without a save
+    state = replaceDocument(state, paragraphs(0, 5))
     expect(decorated(state)).toEqual([])
   })
 

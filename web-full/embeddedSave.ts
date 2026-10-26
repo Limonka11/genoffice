@@ -6,9 +6,9 @@
 // An explicit save also settles the slot markers (markersPlugin.ts, markersOnSave) before the host hears of
 // it. The app re-parses the saved bytes after this returns, and the nodes then carry the saved file's
 // paragraph numbering while the host's markers name the opened file's paragraphs. Outside review mode the
-// markers are sealed, so none can land on a wrong paragraph until the next open. In review mode they are
-// cleared instead: the host compares the saved file's body skeleton with the source's and posts them again
-// when the numbering is unchanged.
+// markers are sealed, so none can land on a wrong paragraph until the next open. In review mode they stay:
+// the app replaces the document only when the re-parse differs, and that replace keeps only the markers
+// the host posted after the save, once it found the saved file's body skeleton unchanged.
 import type { EditorToHost } from './embed-protocol'
 
 export function embeddedSave(

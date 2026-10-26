@@ -8,9 +8,11 @@
 // markers plugin on it and routes vound:markers, vound:scrollTo and vound:focus to it.
 // Review mode: vound:open with mode 'review' puts the handed-over editor in review mode (reviewMode.ts),
 // which reports edits and caret moves in marked blocks and shows the field chip; an open without it leaves
-// review mode. A save in review mode clears the markers instead of sealing them.
+// review mode. A save in review mode does not seal the markers (markersPlugin.ts, markersOnSave).
 // Field writes: vound:setFieldValue and vound:placeCaret act on the handed-over editor (fieldWrite.ts); every
 // setFieldValue is answered with vound:fieldValueResult.
+// Zoom: the app's width fit asks reviewFitWidth and reviewFitZoom (the reviewFitZoom transform in
+// vite.config.ts); in review mode they keep the field chip's gutter free and cap the fit at 100 %.
 import type { Editor } from '@tiptap/core'
 import { isEmbedded, type EditorToHost, type SlotMarker } from './embed-protocol'
 import { acceptsHostMessage, readHostMessage } from './embedMessages'
@@ -18,6 +20,7 @@ import { embeddedSave } from './embeddedSave'
 import { applyFieldValue, placeCaret } from './fieldWrite'
 import { markersKey, markersOnSave, markersPlugin, scrollToMarker, setCurrent, setMarkers, resetMarkers } from './markersPlugin'
 import { enterReviewMode, leaveReviewMode } from './reviewMode'
+import { reviewFitWidth, reviewFitZoom } from './reviewGutter'
 type Handler = (...args: unknown[]) => void
 const calls: string[] = []
 let openHandler: Handler | null = null
@@ -62,7 +65,7 @@ function download(name: string, bytes: Uint8Array) {
 }
 async function persist(path: string, data: ArrayBuffer, triggerDownload: boolean, auto?: boolean) {
   // the host owns persistence when embedded; only explicit saves reach it (embeddedSave.ts)
-  // review mode clears the markers on a save (the host posts them again), the plain embed seals them
+  // review mode keeps the markers through a save (the re-parse keeps only those posted since), the plain embed seals them
   if (embedded) return embeddedSave(path, data, auto, toHost, () => { if (hostEditor) markersOnSave(hostEditor.view, reviewMode ? 'review' : 'plain') })
   const name = path.split('/').pop()!.replace(/\.docx$/, '')
   lastSave.name = name; lastSave.bytes = new Uint8Array(data)
@@ -114,6 +117,8 @@ const known: Record<string, unknown> = {
   hostDirty,
   onMenuCommand: (h: Handler) => { menuHandler = h; return () => { menuHandler = null } },
   hostEditor: handOverEditor,
+  reviewFitWidth: (canvasWidth: number) => reviewFitWidth(canvasWidth, reviewMode),
+  reviewFitZoom: (zoom: number) => reviewFitZoom(zoom, reviewMode),
 }
 export function installDesktopShim() {
   const w = window as unknown as Record<string, unknown>

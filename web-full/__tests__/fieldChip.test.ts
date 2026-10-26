@@ -75,6 +75,8 @@ describe('mountFieldChip', () => {
     // in the gutter 10px right of the page, vertically centred on the block, the tether across the margin
     expect(chip()!.style.left).toBe('910px')
     expect(chip()!.style.top).toBe('110px')
+    // never wider than the gutter: 300px less the 10px distance and the 16px slack
+    expect(chip()!.style.maxWidth).toBe('274px')
     const tether = scroller.querySelector<HTMLElement>('.vound-chip-tether')!
     expect(tether.hidden).toBe(false)
     expect(tether.style.left).toBe('804px')
@@ -91,6 +93,8 @@ describe('mountFieldChip', () => {
     expect(shown()).toBe(true)
     expect(chip()!.querySelectorAll('.vound-chip-row')).toHaveLength(2)
     expect(rowLabels()).toEqual(['Ort', 'Datum'])
+    // a label cut short in a narrow gutter can still be read
+    expect([...chip()!.querySelectorAll<HTMLElement>('.vound-chip-label')].map((l) => l.title)).toEqual(['Ort', 'Datum'])
     expect(buttons().map((b) => b.title)).toEqual(['Wert eintragen', 'Agent fragen', 'KI-Wert wiederherstellen', 'Wert eintragen'])
     expect(buttons().map((b) => b.text)).toEqual(['✎', '✦', '↺', '✎'])
   })
@@ -175,8 +179,26 @@ describe('mountFieldChip', () => {
     expect(shown()).toBe(false)
   })
 
+  it('a multi-field chip stays inside a narrow gutter instead of being dropped', () => {
+    // 100px of gutter: room for 74px of chip, enough for two buttons, the labels shrink or wrap
+    gutterRight = 1000
+    const { v } = chipView([marker('ort', 1, ['fill', 'ask'], 'Ort der Leistungserbringung'), marker('datum', 1, ['accept', 'reject'], 'Datum')])
+    hover(block(v, 'ort'))
+    expect(shown()).toBe(true)
+    expect(chip()!.style.maxWidth).toBe('74px')
+    expect(rowLabels()).toEqual(['Ort der Leistungserbringung', 'Datum'])
+  })
+
+  it('in a multi-column section the chip shows without its tether', () => {
+    const { v } = chipView([marker('name', 2, ['accept', 'reject'])])
+    v.dom.style.columnCount = '2'
+    hover(block(v, 'name'))
+    expect(shown()).toBe(true)
+    expect(scroller.querySelector<HTMLElement>('.vound-chip-tether')!.hidden).toBe(true)
+  })
+
   it('is not shown when the gutter is narrower than the chip, the hover outline still is', () => {
-    // 75px of gutter: less than the chip's 60px plus 16px
+    // 75px of gutter: 49px of room, less than two 24px buttons in their frame (58px)
     gutterRight = 975
     const { v } = chipView([marker('name', 2, ['accept', 'reject'])])
     hover(block(v, 'name'))

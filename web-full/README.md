@@ -80,17 +80,21 @@ change dropped a decoration, or while markers wait for their document. The wait 
 build that sees nodes with source indices, so markers that all miss a loaded document do not cost a
 walk per edit. Markers sent before the app handed over its editor (`hostEditorHandle` in
 `vite.config.ts`) are applied when it does. `vound:scrollTo` and `vound:focus` add
-`vound-slot-current`, and `vound:scrollTo` finds a shared node by any of its ids; `host.css` holds the six tone colours
-(review mode restyles them, see Field chip).
+`vound-slot-current`, and `vound:scrollTo` finds a shared node by any of its ids; `host.css` holds the
+six tone colours (review mode restyles them, see Field chip).
 
 After a save the app re-parses the saved bytes, so the nodes may carry the saved file's numbering, which
 the host's markers do not name. Outside review mode an explicit save therefore seals the markers:
 `embeddedSave.ts` clears them before it posts `vound:saved`, and the editor ignores `vound:markers` and
-`vound:focus` until the next `vound:open`. In review mode the save clears the markers without sealing
-them and keeps the current id (`markersOnSave`): the host compares the saved file's body skeleton with the
-source's and, when the numbering is unchanged, posts `vound:markers` again, which apply as usual. Markers
-posted before the app's re-parse replaced the document are built again on the re-parsed one. The host has
-to post them after every `vound:saved` in review mode; until it does, no field is marked. Every `vound:open` resets the markers (`resetMarkers`: none, no current one, not sealed) before
+`vound:focus` until the next `vound:open`. In review mode a save does not seal (`markersOnSave`): the
+markers stay on the nodes they mark. The app replaces the document with the re-parsed saved bytes only
+when the parse differs from the editor's document and nothing changed it since the save; that replace
+keeps the markers the host posted after the save (it posts them once the saved file's body skeleton
+matches the source's) and builds them on the new document, and drops older ones, which may name
+renumbered paragraphs. When no replace follows (a clean save, or an edit after it), the paragraphs keep
+their numbering and so do the markers. The host's markers apply after a save as at any other time.
+
+Every `vound:open` resets the markers (`resetMarkers`: none, no current one, not sealed) before
 the document loads, so the previous document's indices never land on the new one; markers posted after
 the open apply as usual, so the host posts markers after `vound:open`. The first whole-document replace
 after a `vound:open` (or the editor's first document) is that open's document, and the markers are built
@@ -171,10 +175,23 @@ zero-height layer appended to the scroll container (`.editor-scroll`), so it scr
 1px tether runs at the block's height from where the page-level block around it ends (the paragraph, or
 the whole table for a cell) to the chip, across the page's right margin only, so neither covers text. The
 chip stays while the pointer moves from the block to it and hides 220ms after the pointer left both; a
-scroll, a window resize or leaving the window hides it too. It is not shown when the gutter (scroll
-container's right edge without the scrollbar, minus the page's right edge) is narrower than the chip plus
-16px; the host's bar offers the current field's buttons then. At the app's fit-to-width zoom the page fills
-the canvas, so the chip shows only while the iframe is wider than the page plus that room.
+scroll, a window resize or leaving the window hides it too. In a multi-column section the tether is left
+out, because the next column may lie between the block and the margin.
+
+The chip never grows past the gutter (the scroll container's right edge without the scrollbar, minus the
+page's right edge, less the 10px distance and 16px of slack): its `max-width` is set from it, and a
+field's label that does not fit beside its buttons takes a line of its own above them and is cut short,
+with the full label in its `title`. Only a gutter narrower than the buttons hides the chip; the host's bar
+offers the current field's buttons then. Review mode keeps that gutter free (`reviewGutter.ts`):
+`host.css` puts the page at the left of the canvas (`.doc-zoom` without its left auto margin), so all
+spare width lies right of it, and the `reviewFitZoom` transform in `vite.config.ts` makes App.tsx's width
+fit (`rawFitWidth`, the overflow clamp, and `fitZoomFor`, Page Width / Text Width / One Page and the fit
+mode that follows resizes) measure the canvas through the shim's `reviewFitWidth`, which subtracts
+`GUTTER_RESERVE_PX` (84px: a two-button chip, its distance and its slack), and cap the fit at 100 % through
+`reviewFitZoom`. A canvas narrower than the page plus the reserve zooms the page out (900px: 96 % for A4),
+also when the app locked into fit mode at mount; a wide one keeps 100 %. A zoom the reviewer picks by hand
+is not capped; above the fit the chip may not show. Outside review mode the shim returns width and zoom
+unchanged.
 
 The hovered block gets `vound-slot-hot`, a 1px ring at 45 %, through a decoration in the markers plugin
 (`setHot`, mapped through edits): a class written onto the block's DOM would read as a DOM change to
