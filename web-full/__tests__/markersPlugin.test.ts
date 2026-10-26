@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EditorState, type Transaction } from '@tiptap/pm/state'
 import { DecorationSet } from '@tiptap/pm/view'
 import type { SlotMarker } from '../embed-protocol'
-import { markersKey, markersPlugin } from '../markersPlugin'
+import { markersKey, markersPlugin, saveMeta, viewDecorations } from '../markersPlugin'
 import { doc, para, paragraphs, schema } from './markerSchema'
 
 const marker = (id: string, paragraph: number): SlotMarker => ({ id, paragraph, scope: 'paragraph', tone: 'proposed', label: id, actions: [] })
@@ -126,6 +126,7 @@ describe('markersPlugin', () => {
       sealed: false,
       placedOnce: false,
       awaitingDocument: true,
+      hot: null,
       set: DecorationSet.empty,
     })
     state = withMeta(state, { markers: [marker('s1', 1)] })
@@ -165,5 +166,51 @@ describe('markersPlugin', () => {
     state = withMeta(state, { markers: [marker('s46', 46)] })
     state = replaceDocument(state, paragraphs(40, 50))
     expect(decorated(state).map((d) => d.id)).toEqual(['s46'])
+  })
+
+  it('in review mode a save does not seal and later markers apply', () => {
+    let state = withMeta(stateWith(...paragraphs(0, 5)), { markers: [marker('s1', 1), marker('s3', 3)] })
+    state = withMeta(state, { current: 's3' })
+
+    // the saved file may number its paragraphs differently: the markers go until the host has checked it
+    state = withMeta(state, saveMeta('review'))
+    expect(markersKey.getState(state)).toMatchObject({ markers: [], current: 's3', sealed: false })
+    expect(decorated(state)).toEqual([])
+
+    // the host's markers arrive before the app's re-parse replaced the document; they are built again on it
+    state = withMeta(state, { markers: [marker('s1', 1), marker('s3', 3)] })
+    expect(decorated(state).map((d) => d.id)).toEqual(['s1', 's3'])
+    state = replaceDocument(state, paragraphs(0, 5))
+    expect(decorated(state).map((d) => d.id)).toEqual(['s1', 's3'])
+    expect(markersKey.getState(state)!.current).toBe('s3')
+
+    // a save whose document the app keeps (no re-parse): markers posted afterwards apply directly
+    state = withMeta(state, saveMeta('review'))
+    state = withMeta(state, { markers: [marker('s2', 2)] })
+    expect(decorated(state).map((d) => d.id)).toEqual(['s2'])
+
+    // outside review mode a save still seals
+    state = withMeta(state, saveMeta('plain'))
+    state = withMeta(state, { markers: [marker('s2', 2)] })
+    expect(markersKey.getState(state)!.sealed).toBe(true)
+    expect(decorated(state)).toEqual([])
+  })
+
+  it('the hover outline follows its block through edits and goes with the markers', () => {
+    let state = withMeta(stateWith(...paragraphs(0, 3)), { markers: [marker('s1', 1)] })
+    const [block] = decorated(state)
+    state = withMeta(state, { hot: block.from })
+    const hotClass = (s: EditorState) => viewDecorations(s).find(undefined, undefined, (spec) => spec.hot === true).map((d) => d.from)
+    expect(hotClass(state)).toEqual([block.from])
+
+    state = apply(state, (tr) => tr.insertText('xx', 1))
+    expect(hotClass(state)).toEqual([block.from + 2])
+
+    state = withMeta(state, { hot: null })
+    expect(hotClass(state)).toEqual([])
+
+    state = withMeta(state, { hot: decorated(state)[0].from })
+    state = withMeta(state, { markers: [] })
+    expect(hotClass(state)).toEqual([])
   })
 })

@@ -6,6 +6,8 @@ import type { BlockRef, MarkerTone, SlotMarker } from './embed-protocol'
 
 export const MARKER_CLASS = 'vound-slot'
 export const CURRENT_CLASS = 'vound-slot-current'
+/** the block under the pointer in review mode (fieldChip.ts) */
+export const HOT_CLASS = 'vound-slot-hot'
 
 const cellTypes = ['docTableCell', 'docTableHeader']
 

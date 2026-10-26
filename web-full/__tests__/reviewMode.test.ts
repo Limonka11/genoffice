@@ -11,9 +11,14 @@ import { baseKeymap } from '@tiptap/pm/commands'
 import { keymap } from '@tiptap/pm/keymap'
 import { EditorState, NodeSelection, TextSelection, type Plugin } from '@tiptap/pm/state'
 import { EditorView, type EditorProps } from '@tiptap/pm/view'
+import { mountFieldChip } from '../fieldChip'
 import { fieldReportingKey } from '../fieldReporting'
 import { enterReviewMode, leaveReviewMode, reviewModeKey, reviewModePlugin } from '../reviewMode'
 import { doc, fieldPara, para, schema } from './markerSchema'
+
+// the chip itself is tested in fieldChip.test.ts; here only that review mode mounts and unmounts it
+const unmountChip = vi.hoisted(() => vi.fn())
+vi.mock('../fieldChip', () => ({ mountFieldChip: vi.fn(() => unmountChip) }))
 
 // jsdom has no ClipboardEvent; ProseMirror's pasteHTML creates one when it is not given an event
 beforeAll(() => {
@@ -217,5 +222,24 @@ describe('a field block selected as a whole in review mode', () => {
     expect(typeText(v, 'x')).toBeFalsy()
     // a collapsed caret's Backspace is the browser's own deletion: nothing takes the key
     expect(key(v, 'Backspace').defaultPrevented).toBe(false)
+  })
+})
+
+describe('the field chip in review mode', () => {
+  it('is mounted once per editor on entering and unmounted on leaving', () => {
+    const ed = new Editor({ element: document.createElement('div'), extensions: [Document, Paragraph, Text], content: '<p>Hallo</p>' })
+    editor = ed
+    vi.mocked(mountFieldChip).mockClear()
+    unmountChip.mockClear()
+    enterReviewMode(ed, post)
+    enterReviewMode(ed, post)
+    expect(mountFieldChip).toHaveBeenCalledTimes(1)
+    expect(mountFieldChip).toHaveBeenCalledWith(ed.view, post)
+    expect(unmountChip).not.toHaveBeenCalled()
+    leaveReviewMode(ed)
+    expect(unmountChip).toHaveBeenCalledTimes(1)
+    // the afterEach leaves again: nothing left to unmount
+    leaveReviewMode(ed)
+    expect(unmountChip).toHaveBeenCalledTimes(1)
   })
 })

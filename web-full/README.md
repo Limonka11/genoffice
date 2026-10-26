@@ -80,12 +80,17 @@ change dropped a decoration, or while markers wait for their document. The wait 
 build that sees nodes with source indices, so markers that all miss a loaded document do not cost a
 walk per edit. Markers sent before the app handed over its editor (`hostEditorHandle` in
 `vite.config.ts`) are applied when it does. `vound:scrollTo` and `vound:focus` add
-`vound-slot-current`, and `vound:scrollTo` finds a shared node by any of its ids; `host.css` holds the six tone colours.
+`vound-slot-current`, and `vound:scrollTo` finds a shared node by any of its ids; `host.css` holds the six tone colours
+(review mode restyles them, see Field chip).
 
-An explicit save seals the markers: `embeddedSave.ts` clears them before it posts `vound:saved`, and the
-editor ignores `vound:markers` and `vound:focus` until the next `vound:open`. After a save the app
-re-parses the saved bytes, so the nodes carry the saved file's numbering, which the host's markers do not
-name. Every `vound:open` resets the markers (`resetMarkers`: none, no current one, not sealed) before
+After a save the app re-parses the saved bytes, so the nodes may carry the saved file's numbering, which
+the host's markers do not name. Outside review mode an explicit save therefore seals the markers:
+`embeddedSave.ts` clears them before it posts `vound:saved`, and the editor ignores `vound:markers` and
+`vound:focus` until the next `vound:open`. In review mode the save clears the markers without sealing
+them and keeps the current id (`markersOnSave`): the host compares the saved file's body skeleton with the
+source's and, when the numbering is unchanged, posts `vound:markers` again, which apply as usual. Markers
+posted before the app's re-parse replaced the document are built again on the re-parsed one. The host has
+to post them after every `vound:saved` in review mode; until it does, no field is marked. Every `vound:open` resets the markers (`resetMarkers`: none, no current one, not sealed) before
 the document loads, so the previous document's indices never land on the new one; markers posted after
 the open apply as usual, so the host posts markers after `vound:open`. The first whole-document replace
 after a `vound:open` (or the editor's first document) is that open's document, and the markers are built
@@ -148,6 +153,37 @@ being edited, the caret counts as in that field's block. Tab there is caught bef
 commits the field, so `vound:blockEdited` comes first, then reports leaving with Tab. A click on such a
 field selects it as an object; review mode then refuses typing, Backspace, Delete, paste and cut, which
 would replace the block, and the field with it, by plain text.
+
+## Field chip
+
+In review mode (`fieldChip.ts`, mounted by `reviewMode.ts`) hovering a marked block shows a chip with the
+buttons the host sent for its fields (`SlotMarker.actions`): ✓ „Übernehmen" (`accept`), ✕ „Ablehnen"
+(`reject`), ✎ „Wert eintragen" (`fill`), ✦ „Agent fragen" (`ask`), ↺ „KI-Wert wiederherstellen"
+(`restore`), each a 24px button with that `title` and `aria-label`. A press posts `vound:fieldAction
+{ id, action }` and hides the chip; a button whose action the field no longer offers (the markers changed
+under the open chip) posts nothing. A block holding several fields gets one row per field, labelled with
+`SlotMarker.label`, in the order of its `data-vound-slot` ids; a single field's row has no label. Fields
+without actions get no row, and a block whose fields have none gets no chip. A press does not take the
+focus from the document.
+
+The chip sits in the gutter 10px right of the page (`.doc-page`), vertically centred on the block, in a
+zero-height layer appended to the scroll container (`.editor-scroll`), so it scrolls with the page. A dashed
+1px tether runs at the block's height from where the page-level block around it ends (the paragraph, or
+the whole table for a cell) to the chip, across the page's right margin only, so neither covers text. The
+chip stays while the pointer moves from the block to it and hides 220ms after the pointer left both; a
+scroll, a window resize or leaving the window hides it too. It is not shown when the gutter (scroll
+container's right edge without the scrollbar, minus the page's right edge) is narrower than the chip plus
+16px; the host's bar offers the current field's buttons then. At the app's fit-to-width zoom the page fills
+the canvas, so the chip shows only while the iframe is wider than the page plus that room.
+
+The hovered block gets `vound-slot-hot`, a 1px ring at 45 %, through a decoration in the markers plugin
+(`setHot`, mapped through edits): a class written onto the block's DOM would read as a DOM change to
+ProseMirror. In review mode `host.css` restyles the markers: a soft tint and a 2px leading bar (a
+background layer, so no box changes), no outline. Proposed is violet, a field still needing a value (gap,
+conditional with a dashed bar, refused) amber, accepted cyan with a ✓ after its text (inline with a
+negative margin, so it never adds a line), rejected white with a rose bar and a 1px rose edge. The current
+field has a 1.5px ring and a 5px halo, violet, amber for a field still needing a value. Every colour is a
+custom property under `html.vound-review`. Without review mode the markers keep the PR #3362 look.
 
 ## Field writes
 

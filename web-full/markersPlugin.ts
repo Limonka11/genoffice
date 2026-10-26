@@ -1,26 +1,37 @@
 // The host's slot markers inside the editor: a ProseMirror plugin that keeps them as node decorations
 // across edits, phased loading and re-parses, plus the calls the shim makes for vound:markers,
 // vound:scrollTo and vound:focus. Decorations live in the view only, so nothing here reaches a save.
-import { Plugin, PluginKey, type Transaction } from '@tiptap/pm/state'
+// In review mode the chip (fieldChip.ts) marks the hovered block, and a save clears the markers instead of
+// sealing them: the host checks the saved file and posts them again.
+import { Plugin, PluginKey, type EditorState, type Transaction } from '@tiptap/pm/state'
 import { ReplaceStep } from '@tiptap/pm/transform'
-import { DecorationSet, type EditorView } from '@tiptap/pm/view'
+import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
 import type { Node as PmNode } from '@tiptap/pm/model'
 import type { SlotMarker } from './embed-protocol'
-import { hasSourceIndices, markerDecorations } from './markers'
+import { HOT_CLASS, hasSourceIndices, markerDecorations } from './markers'
 
 /** `placedOnce`: a build since the last vound:markers ran against a parsed document (one whose nodes carry
  *  source indices), whether or not any marker matched; until then an edit may still bring the document.
  *  `awaitingDocument`: the document of the last vound:open (or the editor's first one) has not replaced the
- *  content yet; its whole-document replace rebuilds the markers, any later one clears them */
+ *  content yet; its whole-document replace rebuilds the markers, any later one clears them.
+ *  `hot`: the start of the marked block under the pointer (fieldChip.ts), mapped through edits */
 export type MarkersState = {
   markers: SlotMarker[]
   current: string | null
   sealed: boolean
   placedOnce: boolean
   awaitingDocument: boolean
+  hot: number | null
   set: DecorationSet
 }
-type MarkersMeta = { markers?: SlotMarker[]; current?: string | null; sealed?: true; reset?: true }
+type MarkersMeta = {
+  markers?: SlotMarker[]
+  current?: string | null
+  sealed?: true
+  reset?: true
+  saved?: true
+  hot?: number | null
+}
 
 export const markersKey = new PluginKey<MarkersState>('voundMarkers')
 
@@ -30,6 +41,7 @@ const initial: MarkersState = {
   sealed: false,
   placedOnce: false,
   awaitingDocument: true,
+  hot: null,
   set: DecorationSet.empty,
 }
 
@@ -55,6 +67,8 @@ function afterDocChange(tr: Transaction, old: MarkersState): MarkersState {
     // replaced everything afterwards: the host's indices name another document, so the markers go
     return { ...initial, awaitingDocument: false }
   }
+  const hot = old.hot === null ? null : tr.mapping.map(old.hot, 1)
+  const kept = { ...old, hot }
   const mapped = old.set.map(tr.mapping, tr.doc)
   const oldCount = old.set.find().length
   // phased appends, splits and deletions change the block count; a split leaves one index on two nodes
@@ -66,15 +80,19 @@ function afterDocChange(tr: Transaction, old: MarkersState): MarkersState {
   // content without changing the block count. Once a build saw a parsed document this stays off, so
   // markers that all missed it do not cost a walk per keystroke
   const neverPlaced = oldCount === 0 && !old.placedOnce
-  if (blockCountChanged || decorationDropped || neverPlaced) return rebuild(tr.doc, old)
-  return { ...old, set: mapped }
+  if (blockCountChanged || decorationDropped || neverPlaced) return rebuild(tr.doc, kept)
+  return { ...kept, set: mapped }
 }
 
 function apply(tr: Transaction, old: MarkersState): MarkersState {
   const meta: MarkersMeta | undefined = tr.getMeta(markersKey)
   if (meta?.sealed) return { ...initial, sealed: true }
   if (meta?.reset) return initial
+  // a save in review mode: no marker lands on the saved file's numbering until the host posts them again;
+  // markers posted before the app's re-parse replaced the document are built again on it
+  if (meta?.saved) return { ...initial, current: old.current }
   if (old.sealed) return old
+  if (meta && meta.hot !== undefined) return { ...old, hot: meta.hot }
   if (meta?.markers) return rebuild(tr.doc, { ...old, markers: meta.markers, placedOnce: false })
   if (meta && meta.current !== undefined) return rebuild(tr.doc, { ...old, current: meta.current })
   if (tr.docChanged) return afterDocChange(tr, old)
@@ -85,9 +103,20 @@ export const markersPlugin = new Plugin<MarkersState>({
   key: markersKey,
   state: { init: () => initial, apply },
   props: {
-    decorations: (state) => markersKey.getState(state)?.set,
+    decorations: (state) => viewDecorations(state),
   },
 })
+
+/** what the view draws: the marker decorations, plus the hover outline on the hot block while a marker
+ *  decoration still starts there */
+export function viewDecorations(state: EditorState) {
+  const markers = markersKey.getState(state)
+  if (!markers || markers.hot === null) return markers?.set ?? DecorationSet.empty
+  const hot = markers.hot
+  const block = markers.set.find(hot, hot).find((decoration) => decoration.from === hot)
+  if (!block) return markers.set
+  return markers.set.add(state.doc, [Decoration.node(block.from, block.to, { class: HOT_CLASS }, { hot: true })])
+}
 
 const dispatchMeta = (view: EditorView, meta: MarkersMeta) => view.dispatch(view.state.tr.setMeta(markersKey, meta))
 
@@ -101,9 +130,20 @@ export function setCurrent(view: EditorView, id: string | null) {
   dispatchMeta(view, { current: id })
 }
 
-/** after an explicit save: drop every marker and ignore markers and focus until the next document opens */
-export function sealMarkers(view: EditorView) {
-  dispatchMeta(view, { sealed: true })
+/** after an explicit save outside review mode: drop every marker and ignore markers and focus until the
+ *  next document opens. In review mode: drop the markers, keep the current id, and apply the markers the
+ *  host posts once it has checked the saved file */
+export const saveMeta = (mode: 'review' | 'plain'): MarkersMeta => (mode === 'review' ? { saved: true } : { sealed: true })
+
+/** an explicit save (embeddedSave.ts), in review mode or not */
+export function markersOnSave(view: EditorView, mode: 'review' | 'plain') {
+  dispatchMeta(view, saveMeta(mode))
+}
+
+/** mark the block starting at `pos` as hovered, or none (fieldChip.ts) */
+export function setHot(view: EditorView, pos: number | null) {
+  if (markersKey.getState(view.state)?.hot === pos) return
+  dispatchMeta(view, { hot: pos })
 }
 
 /** a document opens (vound:open): drop the previous document's markers and the seal, so no old index

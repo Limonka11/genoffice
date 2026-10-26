@@ -7,7 +7,8 @@
 // Markers: the app hands over its editor (vite.config.ts, hostEditorHandle); the shim registers the
 // markers plugin on it and routes vound:markers, vound:scrollTo and vound:focus to it.
 // Review mode: vound:open with mode 'review' puts the handed-over editor in review mode (reviewMode.ts),
-// which reports edits and caret moves in marked blocks; an open without it leaves review mode.
+// which reports edits and caret moves in marked blocks and shows the field chip; an open without it leaves
+// review mode. A save in review mode clears the markers instead of sealing them.
 // Field writes: vound:setFieldValue and vound:placeCaret act on the handed-over editor (fieldWrite.ts); every
 // setFieldValue is answered with vound:fieldValueResult.
 import type { Editor } from '@tiptap/core'
@@ -15,7 +16,7 @@ import { isEmbedded, type EditorToHost, type SlotMarker } from './embed-protocol
 import { acceptsHostMessage, readHostMessage } from './embedMessages'
 import { embeddedSave } from './embeddedSave'
 import { applyFieldValue, placeCaret } from './fieldWrite'
-import { markersKey, markersPlugin, scrollToMarker, sealMarkers, setCurrent, setMarkers, resetMarkers } from './markersPlugin'
+import { markersKey, markersOnSave, markersPlugin, scrollToMarker, setCurrent, setMarkers, resetMarkers } from './markersPlugin'
 import { enterReviewMode, leaveReviewMode } from './reviewMode'
 type Handler = (...args: unknown[]) => void
 const calls: string[] = []
@@ -61,7 +62,8 @@ function download(name: string, bytes: Uint8Array) {
 }
 async function persist(path: string, data: ArrayBuffer, triggerDownload: boolean, auto?: boolean) {
   // the host owns persistence when embedded; only explicit saves reach it (embeddedSave.ts)
-  if (embedded) return embeddedSave(path, data, auto, toHost, () => { if (hostEditor) sealMarkers(hostEditor.view) })
+  // review mode clears the markers on a save (the host posts them again), the plain embed seals them
+  if (embedded) return embeddedSave(path, data, auto, toHost, () => { if (hostEditor) markersOnSave(hostEditor.view, reviewMode ? 'review' : 'plain') })
   const name = path.split('/').pop()!.replace(/\.docx$/, '')
   lastSave.name = name; lastSave.bytes = new Uint8Array(data)
   const res = await fetch(`/__save?name=${encodeURIComponent(name)}`, { method: 'POST', body: data }).catch(() => null)
