@@ -1436,6 +1436,8 @@ export function tableStructureSignature(table: PmNode): string {
         cell.attrs?.cellMar ?? null,
         cell.attrs?.noWrap ?? null,
         cell.attrs?.tcPrEdited ?? false,
+        // a cell turned into a grid gap (delete cells, shift left) leaves the grid as a gridAfter
+        cell.attrs?.gridGap ?? false,
       ]),
     ]),
   })
@@ -1474,10 +1476,60 @@ export function tableFormattingSignature(table: PmNode): string {
             ? [paragraph.attrs?.kind, paragraph.attrs?.numId, paragraph.attrs?.ilvl]
             : null,
           inlineFormattingSignature(paragraph.content),
+          // the text and pictures decide whether a run-format change needs a regeneration
+          // (tableFormattingChanged)
+          paragraph.type === 'docParagraph' || paragraph.type === 'docListItem'
+            ? paragraphText(paragraph)
+            : null,
+          (paragraph.content ?? []).some((node) => node.type === 'docInlineImage'),
         ]),
       ),
     ),
   )
+}
+
+/** the paragraph signatures of a table signature in document order, or null when the cell grid or a
+ *  cell's paragraph count differs from `other` */
+function pairedParagraphSignatures(signature: string, other: string) {
+  const before = JSON.parse(signature)
+  const after = JSON.parse(other)
+  const sameShape =
+    before.length === after.length &&
+    before.every(
+      (row: unknown[][], r: number) =>
+        row.length === after[r].length &&
+        row.every((cell: unknown[], c: number) => cell.length === after[r][c].length),
+    )
+  if (!sameShape) return null
+  const flat = (grid: unknown[][][][]) => grid.flat(2)
+  const afterParagraphs = flat(after)
+  return flat(before).map((paragraph, i) => [paragraph, afterParagraphs[i]])
+}
+
+/**
+ * Whether a table's formatting changed in a way only a regeneration of the whole table writes (the cell
+ * text patch keeps paragraph formatting). A run-format difference in a paragraph whose text changed too
+ * does not count: the text patch writes that paragraph's runs with their formatting, and keeps a form
+ * field or content control in it (patchFieldParagraphText), which a regeneration drops along with every
+ * other field of the table. Emptying a paragraph removes its runs and their marks, and text typed into
+ * an emptied paragraph may come without them. A picture in the paragraph still regenerates the table:
+ * its size lives in the drawing.
+ */
+export function tableFormattingChanged(table: PmNode): boolean {
+  const original = table.attrs?.originalFormatting
+  const current = tableFormattingSignature(table)
+  if (original === current) return false
+  if (typeof original !== 'string') return true
+  const pairs = pairedParagraphSignatures(original, current)
+  if (!pairs) return true
+  return pairs.some(([before, after]) => {
+    const [formatBefore, listBefore, inlineBefore, textBefore, pictureBefore] = before
+    const [formatAfter, listAfter, inlineAfter, textAfter, pictureAfter] = after
+    if (JSON.stringify([formatBefore, listBefore]) !== JSON.stringify([formatAfter, listAfter])) return true
+    if (JSON.stringify(inlineBefore) === JSON.stringify(inlineAfter)) return false
+    const textEdited = textBefore !== null && textAfter !== null && textBefore !== textAfter
+    return !textEdited || pictureBefore || pictureAfter
+  })
 }
 
 function paragraphText(node: PmNode): string {
@@ -2310,8 +2362,7 @@ export function pmDocToSavePlan(inputDoc: PmNode, originalBlocks: Block[]): Save
         mapAnchor(idx!)
         const structurallyUnchanged =
           node.attrs?.originalStructure === tableStructureSignature(node)
-        const formattingUnchanged =
-          node.attrs?.originalFormatting === tableFormattingSignature(node)
+        const formattingUnchanged = !tableFormattingChanged(node)
         if (
           original.blockRevision &&
           !revision &&
