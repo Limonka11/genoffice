@@ -28,8 +28,9 @@ function unitOf(node: PmNode, pos: number): TextUnit {
   const display = node.attrs.fieldDisplay
   const text = typeof display?.left === 'string' ? display.left : ''
   // only plain text results: the editor also edits TOC lines (title and page number), which this rule
-  // refuses to be safe, and never chart captions
-  const editable = display?.kind === 'text' && !node.attrs.chartDisplay
+  // refuses to be safe, and never chart captions. A lone field end has no result text for a save to
+  // write into (fieldDisplay.fieldEndOnly), so a value written there would be lost
+  const editable = display?.kind === 'text' && !node.attrs.chartDisplay && !display.fieldEndOnly
   return { kind: editable ? 'field' : 'fixed', pos, node, text }
 }
 
@@ -114,9 +115,10 @@ type Planned = { unit: TextUnit; from: number; to: number } | { refused: FieldVa
 
 /** The single match of `needle` inside a field passthrough's result. The editor shows a field's result trimmed
  *  (parse-fields.ts), so the whitespace around the host's previous text may be gone; an empty legacy field's
- *  result is whitespace only and shows as an empty result. */
+ *  result is whitespace only and shows as an empty result. A match in a field this rule leaves alone (a TOC
+ *  line, a lone field end) is found too, so that it is refused as not editable rather than absent. */
 function trimmedFieldMatch(units: TextUnit[], needle: string): Planned {
-  const fields = units.filter((unit) => unit.kind === 'field')
+  const fields = units.filter((unit) => unit.kind !== 'text')
   const matches =
     needle === ''
       ? fields.filter((unit) => unit.text === '').map((unit) => ({ unit, from: 0, to: 0 }))

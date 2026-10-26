@@ -133,6 +133,14 @@ describe('applyFieldValue', () => {
     expect(write(plain, cellBlock(0), 'Muster', 'X')).toEqual({ ok: false, reason: 'noBlock' })
   })
 
+  it('refuses a lone field end, which has no result text for the save to write into', () => {
+    const v = viewOf(para(0, 'Firma:'), fieldPara(1, '', { emptyLine: true, fieldEndOnly: true }))
+    expect(write(v, paragraphBlock(1), '', 'Muster GmbH')).toEqual({ ok: false, reason: 'notEditable' })
+    expect(write(v, paragraphBlock(1), '\u2002\u2002', 'Muster GmbH')).toEqual({ ok: false, reason: 'notEditable' })
+    expect(v.state.doc.child(1).attrs.fieldDisplay.left).toBe('')
+    expect(placeCaret(v, paragraphBlock(1))).toBe(false)
+  })
+
   it('refuses a block without editable text', () => {
     const v = viewOf(schema.nodes.docProtected.create({ docxPara: 0, fieldDisplay: { kind: 'tocLine', left: 'Kapitel', right: '3' } }))
     expect(write(v, paragraphBlock(0), 'Kapitel', 'X')).toEqual({ ok: false, reason: 'notEditable' })

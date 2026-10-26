@@ -1076,9 +1076,12 @@ export interface FieldDisplay {
   /** formatted result runs of a text field (italic journal names, a manual
    *  drop-cap letter next to body text); their joined text equals `left` */
   runs?: FieldRun[]
-  /** text field with no visible result (a paragraph holding only a fldChar end):
-   *  Word shows an empty paragraph, so the renderer keeps its line box */
+  /** text field with no visible result (a paragraph holding only a fldChar end, or a blank legacy text
+   *  form field): Word shows an empty paragraph, so the renderer keeps its line box */
   emptyLine?: boolean
+  /** the paragraph holds only a field end: there is no result text, so an edited result has nowhere to
+   *  go on save */
+  fieldEndOnly?: boolean
   /** explicit paragraph alignment (text fields): overrides the doc default */
   align?: 'left' | 'center' | 'right' | 'justify'
   lineRule?: 'auto' | 'atLeast' | 'exact'

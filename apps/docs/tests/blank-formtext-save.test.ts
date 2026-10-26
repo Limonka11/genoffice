@@ -1,0 +1,68 @@
+/** A blank legacy text form field (its result is en spaces, Word's empty form field) opens as an empty
+ * text field (Vound fork, parse-fields.ts blankFormTextField). An untouched save leaves the document
+ * byte-identical; a typed result lands inside the field result with the field machinery kept. */
+import { Editor } from '@tiptap/core'
+import JSZip from 'jszip'
+import { parseDocx, saveDocx } from '@genoffice/docx-engine'
+import { describe, expect, it } from 'vitest'
+import { buildDocx } from '../../../packages/docx-engine/tests/helpers/build-docx'
+import { blocksToPmDoc, pmDocToSavePlan, type PmNode } from '../src/renderer/editor/convert'
+import { editorExtensions } from '../src/renderer/editor/extensions'
+
+;(globalThis as { CSS?: unknown }).CSS ??= { escape: (s: string) => s }
+
+const BLANK_FORMTEXT =
+  '<w:p><w:r><w:fldChar w:fldCharType="begin"><w:ffData><w:name w:val="Text2"/><w:enabled/><w:textInput/></w:ffData></w:fldChar></w:r>' +
+  '<w:r><w:instrText xml:space="preserve"> FORMTEXT </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r>' +
+  '<w:r><w:t>\u2002</w:t></w:r><w:r><w:t>\u2002</w:t></w:r><w:r><w:t>\u2002</w:t></w:r>' +
+  '<w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>'
+const BODY = '<w:p><w:r><w:t>Firma:</w:t></w:r></w:p>' + BLANK_FORMTEXT + '<w:p><w:r><w:t>Ort:</w:t></w:r></w:p>'
+const FIELD_MACHINERY = [/<w:ffData>/g, /FORMTEXT/g, /fldCharType="begin"/g, /fldCharType="separate"/g, /fldCharType="end"/g]
+
+const documentXmlOf = async (bytes: Uint8Array) => (await JSZip.loadAsync(bytes)).file('word/document.xml')!.async('string')
+
+async function open() {
+  const bytes = await buildDocx({ bodyXml: BODY })
+  const parsed = await parseDocx(bytes)
+  const editor = new Editor({ element: document.createElement('div'), extensions: editorExtensions, content: blocksToPmDoc(parsed.blocks) as never })
+  return { bytes, parsed, editor }
+}
+
+/** the text between the field's separate and end */
+const fieldResult = (xml: string) => {
+  const separate = 'fldCharType="separate"/>'
+  const from = xml.indexOf(separate) + separate.length
+  return xml.slice(from, xml.indexOf('<w:fldChar w:fldCharType="end"', from)).replace(/<[^>]+>/g, '')
+}
+
+describe('a blank legacy text form field through the editor', () => {
+  it('opens as an empty text field and saves untouched byte for byte', async () => {
+    const { bytes, parsed, editor } = await open()
+    const field = editor.getJSON().content?.find((node) => node.type === 'docProtected')
+    expect(field?.attrs?.fieldDisplay).toMatchObject({ kind: 'text', left: '', emptyLine: true })
+    const plan = pmDocToSavePlan(editor.getJSON() as PmNode, parsed.blocks)
+    editor.destroy()
+    expect(plan.changedCount).toBe(0)
+    const saved = await saveDocx(parsed, plan.saveBlocks)
+    expect(await documentXmlOf(saved)).toBe(await documentXmlOf(bytes))
+  })
+
+  it('saves a typed result inside the field result and keeps the field machinery', async () => {
+    const { bytes, parsed, editor } = await open()
+    let fieldPos = -1
+    editor.state.doc.forEach((node, pos) => { if (node.type.name === 'docProtected') fieldPos = pos })
+    const node = editor.state.doc.nodeAt(fieldPos)!
+    // what the editor's field commit writes once the reviewer typed (extensions.ts, wireFieldEditing)
+    const { emptyLine: _placeholderLine, ...display } = node.attrs.fieldDisplay
+    editor.view.dispatch(editor.state.tr.setNodeMarkup(fieldPos, undefined, { ...node.attrs, fieldDisplay: { ...display, left: 'Muster GmbH' } }))
+    const plan = pmDocToSavePlan(editor.getJSON() as PmNode, parsed.blocks)
+    editor.destroy()
+    expect(plan.changedCount).toBe(1)
+    const savedXml = await documentXmlOf(await saveDocx(parsed, plan.saveBlocks))
+    const sourceXml = await documentXmlOf(bytes)
+    expect(fieldResult(savedXml)).toBe('Muster GmbH')
+    expect(savedXml).toContain('<w:t>Firma:</w:t>')
+    expect(savedXml).toContain('<w:t>Ort:</w:t>')
+    for (const pattern of FIELD_MACHINERY) expect(savedXml.match(pattern)?.length).toBe(sourceXml.match(pattern)?.length)
+  })
+})

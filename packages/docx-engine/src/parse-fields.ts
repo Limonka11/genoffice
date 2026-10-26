@@ -289,13 +289,15 @@ export function fieldDisplayOf(
   }
   // a lone field end, or an empty legacy text form field (Word fills its result with en spaces): both
   // show as an empty line, and the form field stays a text field one can type into
-  if (visible === '' && (loneFieldEnd(xml) || blankFormTextField(xml))) {
+  const endOnly = visible === '' && loneFieldEnd(xml)
+  if (endOnly || (visible === '' && blankFormTextField(xml))) {
     // the paragraph mark's size sets the empty line (the end run's rPr does not)
     const sz = directSize(eff.mark)
     return {
       kind: 'text',
       left: '',
       emptyLine: true,
+      ...(endOnly ? { fieldEndOnly: true } : {}),
       ...(sz > 0 ? { szHalfPoints: sz } : {}),
       ...line,
       ...geometry,
@@ -414,19 +416,27 @@ const FIELD_LABELS: Record<string, string> = {
   STYLEREF: 'Style reference field',
 }
 
-/** A paragraph whose only field machinery closes a field begun earlier (TOC end
- *  split off into its own paragraph); no run of its own, so Word lays an empty line. */
-/** One legacy text form field whose result is whitespace only and is held in w:t text, with no line
- *  break or tab: typed text replaces that whitespace in the result's text nodes (patchFieldParagraphXml). */
+/** One legacy text form field whose result is whitespace only, held in w:t text that all lies inside
+ *  the field, with no line break or tab. A save spreads an edited result over every w:t of the paragraph
+ *  (patchFieldParagraphXml), so a text run outside the field would take part of the typed text. */
 export function blankFormTextField(xml: string): boolean {
+  const begins = xml.match(/fldCharType=["']begin["']/g)?.length ?? 0
+  const ends = xml.match(/fldCharType=["']end["']/g)?.length ?? 0
+  const begin = xml.search(/<w:fldChar\b[^>]*fldCharType=["']begin["']/)
+  const end = xml.search(/<w:fldChar\b[^>]*fldCharType=["']end["']/)
+  if (begins !== 1 || ends !== 1 || begin === -1 || end < begin) return false
+  const hasText = (part: string) => /<w:t[\s>]/.test(part)
   return (
-    (xml.match(/fldCharType=["']begin["']/g)?.length ?? 0) === 1 &&
     /<w:instrText\b[^>]*>\s*FORMTEXT\s*<\/w:instrText>/.test(xml) &&
-    /<w:t[\s>]/.test(xml) &&
+    hasText(xml.slice(begin, end)) &&
+    !hasText(xml.slice(0, begin)) &&
+    !hasText(xml.slice(end)) &&
     !/<w:(?:tab|br|cr)\b/.test(xml.replace(/<w:tabs>[\s\S]*?<\/w:tabs>/g, ''))
   )
 }
 
+/** A paragraph whose only field machinery closes a field begun earlier (TOC end
+ *  split off into its own paragraph); no run of its own, so Word lays an empty line. */
 export function loneFieldEnd(xml: string): boolean {
   const ends = xml.match(/fldCharType=["']end["']/g)?.length ?? 0
   return (

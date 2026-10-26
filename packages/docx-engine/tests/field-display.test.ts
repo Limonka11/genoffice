@@ -247,6 +247,7 @@ describe('field paragraph display model', () => {
       kind: 'text',
       left: '',
       emptyLine: true,
+      fieldEndOnly: true,
       lineRule: 'auto',
       lineRawTwips: 360,
       lineSpacing: 1.5,

@@ -13,6 +13,8 @@ describe('a blank legacy text form field (Vound fork)', () => {
   it('parses as a text field with an empty result on its empty line, so it can be typed into', async () => {
     const doc = await parseDocx(await buildDocx({ bodyXml: BLANK_FORMTEXT }))
     expect(doc.blocks[0].fieldDisplay).toMatchObject({ kind: 'text', left: '', emptyLine: true })
+    // unlike a lone field end, it has result text to take a value
+    expect(doc.blocks[0].fieldDisplay?.fieldEndOnly).toBeUndefined()
   })
 
   it('takes a typed result inside the field result and keeps the field machinery', () => {
@@ -24,10 +26,15 @@ describe('a blank legacy text form field (Vound fork)', () => {
     expect(out).toContain(' FORMTEXT ')
   })
 
-  it('leaves a blank result with a line break, and a blank non-form field, as they were', async () => {
+  it('leaves a blank result with a line break, a blank non-form field, and text runs outside the field as they were', async () => {
     const withBreak = BLANK_FORMTEXT.replace('<w:r><w:fldChar w:fldCharType="end"/>', '<w:r><w:br/></w:r><w:r><w:fldChar w:fldCharType="end"/>')
     const page = BLANK_FORMTEXT.replace(' FORMTEXT ', ' PAGE ')
-    for (const bodyXml of [withBreak, page]) {
+    // a save spreads the new result over every w:t of the paragraph (patchFieldParagraphXml): a space run
+    // before or after the field would take part of the typed text outside the field result
+    const space = '<w:r><w:t xml:space="preserve"> </w:t></w:r>'
+    const trailingSpace = BLANK_FORMTEXT.replace('</w:p>', `${space}</w:p>`)
+    const leadingSpace = BLANK_FORMTEXT.replace('<w:p>', `<w:p>${space}`)
+    for (const bodyXml of [withBreak, page, trailingSpace, leadingSpace]) {
       const doc = await parseDocx(await buildDocx({ bodyXml }))
       expect(doc.blocks[0].fieldDisplay?.emptyLine).toBeUndefined()
     }
