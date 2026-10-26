@@ -6,9 +6,11 @@
 // html.vound-review. Edits and caret moves in marked blocks are reported to the host (fieldReporting.ts), and
 // hovering a marked block shows its field chip (fieldChip.ts).
 // A form field selected as a whole block (a click on it selects it as an object) cannot be typed, deleted,
-// pasted or cut over: that would replace the block, and with it the field, by plain text.
+// pasted or cut over: that would replace the block, and with it the field, by plain text. Typing into
+// Word's empty form field result (en spaces) replaces the blank instead of adding to it.
 import type { Editor } from '@tiptap/core'
 import { NodeSelection, Plugin, PluginKey, type EditorState } from '@tiptap/pm/state'
+import type { Node as PmNode } from '@tiptap/pm/model'
 import type { EditorView } from '@tiptap/pm/view'
 import type { EditorToHost } from './embed-protocol'
 import { mountFieldChip } from './fieldChip'
@@ -37,6 +39,22 @@ function keepFieldBlock(view: EditorView, event: Event) {
 
 const deletesSelection = (event: KeyboardEvent) => event.key === 'Backspace' || event.key === 'Delete'
 
+/** Word's empty legacy form field result: a paragraph of en spaces only (a field in a table cell is a plain
+ *  paragraph holding its result) */
+function isFormFieldBlank(node: PmNode) {
+  let plainText = node.childCount > 0
+  node.forEach((child) => { plainText &&= child.isText })
+  return plainText && /^\u2002+$/.test(node.textContent)
+}
+
+/** Typing into an empty form field result replaces its en spaces, wherever the caret sits in them. */
+function replaceFormFieldBlank(view: EditorView, from: number, to: number, text: string) {
+  const $from = view.state.doc.resolve(from)
+  if (!$from.sameParent(view.state.doc.resolve(to)) || !isFormFieldBlank($from.parent)) return false
+  view.dispatch(view.state.tr.insertText(text, $from.start(), $from.end()))
+  return true
+}
+
 export const reviewModePlugin = new Plugin({
   key: reviewModeKey,
   props: {
@@ -56,7 +74,7 @@ export const reviewModePlugin = new Plugin({
     // hidden, its context menu does not open); this keeps any remaining one plain. Hard breaks become line feeds.
     handlePaste: (view, _event, slice) =>
       selectsFieldBlock(view.state) || insertPlainText(view, slice.content.textBetween(0, slice.content.size, '\n', '\n')),
-    handleTextInput: (view) => selectsFieldBlock(view.state),
+    handleTextInput: (view, from, to, text) => selectsFieldBlock(view.state) || replaceFormFieldBlank(view, from, to, text),
     handleKeyPress: (view) => selectsFieldBlock(view.state),
     handleKeyDown: (view, event) => deletesSelection(event) && selectsFieldBlock(view.state),
   },

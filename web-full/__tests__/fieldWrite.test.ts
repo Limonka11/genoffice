@@ -141,6 +141,20 @@ describe('applyFieldValue', () => {
     expect(placeCaret(v, paragraphBlock(1))).toBe(false)
   })
 
+  it("writes Word's empty result (five en spaces) and finds it again for the next write", () => {
+    const enSpaces = '\u2002'.repeat(5)
+    const v = viewOf(table(cell(para(0, 'Fax:')), cell(para(1, '089 123'))), fieldPara(2, 'Muster GmbH'))
+    // reject: the field result becomes Word's empty result
+    expect(write(v, cellBlock(1), '089 123', enSpaces)).toEqual({ ok: true })
+    expect(write(v, paragraphBlock(2), 'Muster GmbH', enSpaces)).toEqual({ ok: true })
+    expect(texts(v)).toEqual(['Fax:', enSpaces, `[${enSpaces}]`])
+    expect(v.state.doc.child(1).attrs.fieldDisplay.emptyLine).toBeUndefined()
+    // restore: the en spaces are the previous text
+    expect(write(v, cellBlock(1), enSpaces, '089 123')).toEqual({ ok: true })
+    expect(write(v, paragraphBlock(2), enSpaces, 'Muster GmbH')).toEqual({ ok: true })
+    expect(texts(v)).toEqual(['Fax:', '089 123', '[Muster GmbH]'])
+  })
+
   it('refuses a block without editable text', () => {
     const v = viewOf(schema.nodes.docProtected.create({ docxPara: 0, fieldDisplay: { kind: 'tocLine', left: 'Kapitel', right: '3' } }))
     expect(write(v, paragraphBlock(0), 'Kapitel', 'X')).toEqual({ ok: false, reason: 'notEditable' })
@@ -214,5 +228,20 @@ describe('placeCaret', () => {
     const v = viewOf(para(0, 'Firma:'), fieldPara(1, '', { emptyLine: true }))
     expect(placeCaret(v, paragraphBlock(1))).toBe(true)
     expect(document.getSelection()!.toString()).toBe('\u00a0')
+  })
+
+  it("selects a whitespace-only result (Word's empty field: five en spaces) so typing replaces it", () => {
+    const enSpaces = '\u2002'.repeat(5)
+    // in a table cell the field result is the paragraph's text
+    const v = viewOf(table(cell(para(0, 'Fax:')), cell(para(1, enSpaces))), fieldPara(2, enSpaces))
+    v.focus = vi.fn()
+    expect(placeCaret(v, cellBlock(1))).toBe(true)
+    expect(v.state.selection.empty).toBe(false)
+    expect(v.state.doc.textBetween(v.state.selection.from, v.state.selection.to)).toBe(enSpaces)
+    v.dispatch(v.state.tr.insertText('0171 999'))
+    expect(texts(v)).toEqual(['Fax:', '0171 999', `[${enSpaces}]`])
+    // a body field passthrough whose result is en spaces (written by the host as an empty result)
+    expect(placeCaret(v, paragraphBlock(2))).toBe(true)
+    expect(document.getSelection()!.toString()).toBe(enSpaces)
   })
 })

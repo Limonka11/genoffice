@@ -38,6 +38,8 @@ html.vound-review .ribbon { display: none !important; }
 html.vound-review .ribbon-tabs { display: none !important; }
 html.vound-review .status-bar { display: none !important; }
 html.vound-review .paste-chip { display: none !important; }
+/* the host's bar shows the save status: the editor's English "Saved" toast stays hidden, error toasts show */
+html.vound-review .app-toast.success { display: none !important; }
 @media screen { html.vound-review .editor-scroll { padding-top: var(--vound-review-top) !important; } }
 /* the page at the left of the canvas: all spare width lies right of it, for the field chip (reviewGutter.ts) */
 html.vound-review .doc-zoom { margin-left: 0; }

@@ -113,7 +113,8 @@ AutoSave toggle; the page area takes the full width.
 `vound:open` with `mode: 'review'` opens the document in review mode (`reviewMode.ts`): the host shows
 its own bar, and the editor works like a text field. `host.css` hides the ribbon, its tab row, the
 status bar and the paste-options chip under `html.vound-review`, and pads the top of the page scroll
-container (`.editor-scroll`) by `--vound-review-top` (52px) for the host's bar. Typing, deleting, keyboard
+container (`.editor-scroll`) by `--vound-review-top` (52px) for the host's bar. The editor's "Saved" toast
+is hidden too (the host's bar shows the save status); error toasts still show. Typing, deleting, keyboard
 undo/redo, clipboard shortcuts, select-all, save, find, zoom and keyboard selection work as usual.
 
 Paste inserts the clipboard's plain text in the formatting of the insertion point (`pasteText.ts`):
@@ -157,6 +158,11 @@ being edited, the caret counts as in that field's block. Tab there is caught bef
 commits the field, so `vound:blockEdited` comes first, then reports leaving with Tab. A click on such a
 field selects it as an object; review mode then refuses typing, Backspace, Delete, paste and cut, which
 would replace the block, and the field with it, by plain text.
+
+Word shows an empty legacy form field as five en spaces (U+2002). Typing into such a blank replaces it
+wherever the caret sits in it: in a table cell, where the field's result is the paragraph's text, review
+mode replaces a paragraph of en spaces only with the first typed text; in a field passthrough, the editor's
+field commit drops the blank (or an empty line's placeholder NBSP) from before or after the typed text.
 
 ## Field chip
 
@@ -227,9 +233,11 @@ Every write is one transaction with the meta `voundHostWrite` (`HOST_WRITE_META`
 and marks the document dirty like typing, but is never reported as `vound:blockEdited`.
 `vound:placeCaret` puts a text caret at the end of a paragraph (a cell's last paragraph), focuses the
 editor and scrolls the caret into view. For a field passthrough it enters the field the way a double
-click does: the DOM caret goes to the end of the result (an empty result's placeholder is selected, so
-typing replaces it), and ProseMirror's selection moves next to the block, never a selection of the block
-itself.
+click does: the DOM caret goes to the end of the result, and ProseMirror's selection moves next to the
+block, never a selection of the block itself. A blank result (whitespace only, such as Word's five en
+spaces) and an empty result's placeholder are selected instead, in a paragraph as in a field passthrough,
+so typing replaces them. Writing five en spaces (Word's empty result) is an ordinary replace, and the en
+spaces are then the `previous` of the next write.
 
 ## Develop
 

@@ -243,3 +243,34 @@ describe('the field chip in review mode', () => {
     expect(unmountChip).toHaveBeenCalledTimes(1)
   })
 })
+
+describe("typing into Word's empty form field result in review mode", () => {
+  const enSpaces = '\u2002'.repeat(5)
+  function caretIn(text: string, offset: number) {
+    const state = EditorState.create({ schema, doc: doc(para(0, 'Fax:'), para(1, text)), plugins: [reviewModePlugin] })
+    const start = state.doc.child(0).nodeSize + 1
+    view = new EditorView(document.createElement('div'), { state: state.apply(state.tr.setSelection(TextSelection.create(state.doc, start + offset))) })
+    return view
+  }
+  const typeAtCaret = (v: EditorView, text: string) => {
+    const { from, to } = v.state.selection
+    const deflt = () => v.state.tr.insertText(text, from, to)
+    if (!v.someProp('handleTextInput', (f) => f(v, from, to, text, deflt))) v.dispatch(deflt())
+  }
+
+  it('replaces the en spaces wherever the caret sits in them, then types on', () => {
+    const v = caretIn(enSpaces, 5)
+    typeAtCaret(v, '0')
+    typeAtCaret(v, '8')
+    expect(v.state.doc.child(1).textContent).toBe('08')
+  })
+
+  it('leaves ordinary spaces and text alone', () => {
+    const spaces = caretIn('   ', 3)
+    typeAtCaret(spaces, 'x')
+    expect(spaces.state.doc.child(1).textContent).toBe('   x')
+    const mixed = caretIn(`${enSpaces}Muster`, 5)
+    typeAtCaret(mixed, 'x')
+    expect(mixed.state.doc.child(1).textContent).toBe(`${enSpaces}xMuster`)
+  })
+})

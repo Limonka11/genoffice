@@ -159,10 +159,14 @@ const besideBlock = (view: EditorView, unit: TextUnit) =>
   Selection.findFrom(view.state.doc.resolve(unit.pos), -1, true) ??
   view.state.selection
 
+/** a result that is whitespace only: Word's empty legacy field shows five en spaces, which typing replaces */
+const isBlank = (text: string) => text !== '' && text.trim() === ''
+
 /** Into a field passthrough's text the way a double click gets there (extensions.ts,
  *  wireProtectedInteractionMode): the node view starts editing, and the DOM caret goes to the end of the
- *  result, or selects the placeholder of an empty one so typing replaces it. Typing there stays in the node
- *  view until the editor commits the field; ProseMirror's own selection moves next to the block. */
+ *  result, or selects an empty result's placeholder or a blank result so typing replaces it. Typing there
+ *  stays in the node view until the editor commits the field; ProseMirror's own selection moves next to
+ *  the block. */
 function enterFieldEditing(view: EditorView, unit: TextUnit) {
   const dom = view.nodeDOM(unit.pos)
   const text = dom instanceof HTMLElement ? dom.querySelector(FIELD_TEXT_SELECTOR) : null
@@ -171,7 +175,7 @@ function enterFieldEditing(view: EditorView, unit: TextUnit) {
   text.focus()
   const range = text.ownerDocument.createRange()
   range.selectNodeContents(text)
-  if (!unit.node.attrs.fieldDisplay.emptyLine) range.collapse(false)
+  if (!unit.node.attrs.fieldDisplay.emptyLine && !isBlank(unit.text)) range.collapse(false)
   const selection = text.ownerDocument.getSelection()
   selection?.removeAllRanges()
   selection?.addRange(range)
@@ -179,15 +183,24 @@ function enterFieldEditing(view: EditorView, unit: TextUnit) {
   return true
 }
 
+/** the end of a paragraph's text, or all of it when it is blank and plain text, so typing replaces it */
+function caretInParagraph(view: EditorView, unit: TextUnit) {
+  const end = unit.pos + unit.node.nodeSize - 1
+  let plainText = true
+  unit.node.forEach((child) => { plainText &&= child.isText })
+  const from = isBlank(unit.text) && plainText ? unit.pos + 1 : end
+  return TextSelection.create(view.state.doc, from, end)
+}
+
 /** vound:placeCaret: the caret at the end of the block's text (a cell's last paragraph), focused and
- *  scrolled into view, or inside a field passthrough's result; false when the block is not found or has
- *  no text to put a caret in */
+ *  scrolled into view, or inside a field passthrough's result; a blank result is selected instead, so
+ *  typing replaces it. False when the block is not found or has no text to put a caret in. */
 export function placeCaret(view: EditorView, block: BlockRef): boolean {
   const located = locateBlock(view.state.doc, block)
   const last = located ? unitsOf(located.node, located.pos).at(-1) : undefined
   if (!last || last.kind === 'fixed') return false
   if (last.kind === 'field') return enterFieldEditing(view, last)
-  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, last.pos + last.node.nodeSize - 1)).scrollIntoView())
+  view.dispatch(view.state.tr.setSelection(caretInParagraph(view, last)).scrollIntoView())
   view.focus()
   return true
 }

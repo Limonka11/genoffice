@@ -65,4 +65,45 @@ describe('a blank legacy text form field through the editor', () => {
     expect(savedXml).toContain('<w:t>Ort:</w:t>')
     for (const pattern of FIELD_MACHINERY) expect(savedXml.match(pattern)?.length).toBe(sourceXml.match(pattern)?.length)
   })
+
+  it('typing after the placeholder of an empty field replaces it (the editor\'s own field commit)', async () => {
+    const { parsed, editor } = await open()
+    /** type `typed` into the field's text the way the reviewer does, then let the editor commit it */
+    const typeIntoField = (typed: (shown: string) => string) => {
+      const text = editor.view.dom.querySelector<HTMLElement>('.doc-field-text')!
+      text.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, button: 0 }))
+      text.textContent = typed(text.textContent ?? '')
+      text.dispatchEvent(new Event('input', { bubbles: true }))
+      window.dispatchEvent(new Event('ai-docs-commit-tables'))
+    }
+    const display = () => editor.state.doc.child(1).attrs.fieldDisplay
+    // an empty line's placeholder NBSP, caret after it
+    typeIntoField((shown) => `${shown}Muster`)
+    expect(display().left).toBe('Muster')
+    expect(display().emptyLine).toBeUndefined()
+
+    // Word's empty result written by the host (five en spaces), caret after it
+    const enSpaces = '\u2002'.repeat(5)
+    editor.view.dispatch(editor.state.tr.setNodeMarkup(editor.state.doc.child(0).nodeSize, undefined, { ...editor.state.doc.child(1).attrs, fieldDisplay: { ...display(), left: enSpaces } }))
+    typeIntoField((shown) => `${shown}Beispiel AG`)
+    expect(display().left).toBe('Beispiel AG')
+
+    const plan = pmDocToSavePlan(editor.getJSON() as PmNode, parsed.blocks)
+    editor.destroy()
+    expect(fieldResult(await documentXmlOf(await saveDocx(parsed, plan.saveBlocks)))).toBe('Beispiel AG')
+  })
+
+  it("saves Word's empty result (five en spaces) written into a body field inside the field result", async () => {
+    const { bytes, parsed, editor } = await open()
+    const enSpaces = '\u2002'.repeat(5)
+    const field = editor.state.doc.child(1)
+    const { emptyLine: _placeholderLine, ...display } = field.attrs.fieldDisplay
+    editor.view.dispatch(editor.state.tr.setNodeMarkup(editor.state.doc.child(0).nodeSize, undefined, { ...field.attrs, fieldDisplay: { ...display, left: enSpaces } }))
+    const plan = pmDocToSavePlan(editor.getJSON() as PmNode, parsed.blocks)
+    editor.destroy()
+    const savedXml = await documentXmlOf(await saveDocx(parsed, plan.saveBlocks))
+    const sourceXml = await documentXmlOf(bytes)
+    expect(fieldResult(savedXml)).toBe(enSpaces)
+    for (const pattern of FIELD_MACHINERY) expect(savedXml.match(pattern)?.length).toBe(sourceXml.match(pattern)?.length)
+  })
 })
