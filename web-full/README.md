@@ -33,8 +33,8 @@ is `embed-protocol.ts`:
 | host → editor | `{ type: 'vound:markers', markers: SlotMarker[] }` replace all slot markers (`{ id, paragraph, scope: 'paragraph' \| 'cell', tone, label, actions }`; `actions` ⊂ `accept`, `reject`, `fill`, `ask`, `restore`; without them a marker gets `label: id`, `actions: []`) |
 | host → editor | `{ type: 'vound:scrollTo', id }` scroll a marker to the middle of the view and make it current |
 | host → editor | `{ type: 'vound:focus', id: string \| null }` make a marker current without scrolling, or none |
-| host → editor | `{ type: 'vound:setFieldValue', requestId, block: BlockRef, previous, value }` replace a field's value in one block (`BlockRef = { paragraph, scope: 'paragraph' \| 'cell' }`, named like a marker); answered with `vound:fieldValueResult` |
-| host → editor | `{ type: 'vound:placeCaret', block: BlockRef }` put the caret at the end of the block's text |
+| host → editor | `{ type: 'vound:setFieldValue', requestId, block: BlockRef, previous, value }` replace a field's value in one block (`BlockRef = { paragraph, scope: 'paragraph' \| 'cell' }`, named like a marker); answered with `vound:fieldValueResult`. Parsed, not acted on yet |
+| host → editor | `{ type: 'vound:placeCaret', block: BlockRef }` put the caret at the end of the block's text. Parsed, not acted on yet |
 | editor → host | `{ type: 'vound:ready' }` after the editor subscribed to open requests |
 | editor → host | `{ type: 'vound:saved', name, bytes: ArrayBuffer }` on every save (⌘S, File › Save, the save command) |
 | editor → host | `{ type: 'vound:dirty', dirty: boolean }` when unsaved changes appear or a save clears them |
@@ -42,7 +42,7 @@ is `embed-protocol.ts`:
 | editor → host | `{ type: 'vound:fieldAction', id, action }` a field chip's button was pressed (`id` is the slot id) |
 | editor → host | `{ type: 'vound:blockEdited', ids }` a user edit changed the text of a marked block; `ids` are its slot ids |
 | editor → host | `{ type: 'vound:caretBlock', ids, leftWith? }` the caret entered a marked block, or left one (`ids: []`, `leftWith: 'Tab' \| 'other'`) |
-| editor → host | `{ type: 'vound:fieldValueResult', requestId, ok, reason? }` the answer to `vound:setFieldValue` (`reason`: `absent`, `ambiguous`, `notEditable`, `noBlock`) |
+| editor → host | `{ type: 'vound:fieldValueResult', requestId, ok, reason? }` the answer to `vound:setFieldValue` (`reason`: `absent`, `ambiguous`, `notEditable`, `noBlock`). Not sent yet |
 
 Host and editor must share one origin. The editor accepts a message only when `event.origin` is its
 own origin and `event.source` is `window.parent` (`embedMessages.ts`), reads it structurally and drops
@@ -105,12 +105,25 @@ AutoSave toggle; the page area takes the full width.
 its own bar, and the editor works like a text field. `host.css` hides the ribbon, its tab row, the
 status bar and the paste-options chip under `html.vound-review`, and pads the top of the page scroll
 container (`.editor-scroll`) by `--vound-review-top` (52px) for the host's bar. Typing, deleting, keyboard
-undo/redo and keyboard selection work as usual. Paste inserts the clipboard's plain text in the
-formatting of the insertion point; paragraphs of the pasted text are joined with a line feed inside the
-one paragraph, so a paste never adds paragraphs. The plugin takes the paste DOM event, because the app's
-own paste handlers are direct editor props that ProseMirror asks before any plugin; a paste that skips
-the event (`view.pasteHTML`) reaches its `handlePaste`. ⌘B, ⌘I, ⌘U and the alignment shortcuts ⌘E, ⌘L,
-⌘R, ⌘J (Ctrl on Windows) do nothing; the plugin sits ahead of the editor's keymaps.
+undo/redo, clipboard shortcuts, select-all, save, find, zoom and keyboard selection work as usual.
+
+Paste inserts the clipboard's plain text in the formatting of the insertion point (`pasteText.ts`):
+`text/plain`, or for an HTML-only clipboard the HTML's text with one line per block. Line breaks and
+paragraph ends become line feeds inside the one paragraph, so a paste never adds paragraphs. The plugin
+takes the paste DOM event, because the app's own paste handlers are direct editor props that ProseMirror
+asks before any plugin, and some of them insert formatted content. A paste that skips the DOM event
+(`view.pasteHTML`) meets the app's `handlePaste` first and reaches the plugin's only when that declines,
+so review mode closes the app's ways in: the paste-options chip is hidden, and the app's context menu
+does not open (a window capture listener stops the `contextmenu` event before React sees it). The
+browser's own menu opens instead; its Paste is an ordinary paste event.
+
+Formatting and document-tool shortcuts do nothing (`reviewShortcuts.ts`): bold, italic, underline,
+alignment, the font, paragraph and hyperlink dialogs, line spacing, paragraph styles, font size, super-
+and subscript, indents, clearing formatting, change case, fields, track changes, comments, footnotes and
+endnotes, and AI proofread. A window capture listener stops them before the editors' keymaps (main
+editor, header and footer, text boxes) and App.tsx's window handler, which acts without looking at
+`defaultPrevented`. On the Mac, Control+letter is text navigation (⌃E end of line): the app and the
+editor do not see it, the browser's own action stays.
 
 A review-mode open that arrives before the app handed over its editor takes effect at the hand-over.
 An open without `mode: 'review'` leaves review mode. The parser accepts `vound:setFieldValue` and

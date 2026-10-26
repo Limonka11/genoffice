@@ -1,5 +1,5 @@
 // A minimal stand-in for the Docs schema: the node names the markers code looks for, docxPara, and the
-// run-formatting mark (docTextStyle) the review-mode paste tests read.
+// run-formatting mark (docTextStyle) and line break (docBreak) the review-mode paste tests read.
 import { Schema, type Node as PmNode } from '@tiptap/pm/model'
 
 export const schema = new Schema({
@@ -7,7 +7,7 @@ export const schema = new Schema({
     doc: { content: 'block+' },
     docParagraph: {
       group: 'block',
-      content: 'text*',
+      content: 'inline*',
       attrs: { docxPara: { default: null }, align: { default: null } },
       // only the view tests (scrollToMarker, reviewMode) render or parse
       toDOM: () => ['p', 0],
@@ -17,7 +17,8 @@ export const schema = new Schema({
     docTable: { group: 'block', content: 'docTableRow+' },
     docTableRow: { content: 'docTableCell+' },
     docTableCell: { content: 'docParagraph+' },
-    text: {},
+    docBreak: { inline: true, group: 'inline', toDOM: () => ['br'], parseDOM: [{ tag: 'br' }] },
+    text: { group: 'inline' },
   },
   marks: {
     docTextStyle: {

@@ -1,11 +1,14 @@
 // Review mode (vound:open with mode 'review'): the host shows its own bar instead of the ribbon, so the
-// editor works like a text field. Paste inserts plain text in the insertion point's formatting, and the
-// formatting shortcuts do nothing. host.css hides the ribbon, its tab row and the status bar under
+// editor works like a text field. Paste inserts plain text in the insertion point's formatting; the
+// formatting and document-tool shortcuts do nothing (reviewShortcuts.ts); the app's own context menu does
+// not open, so its Paste entries cannot bypass the plain-text rule (the browser's menu opens instead, and
+// its Paste is an ordinary paste event). host.css hides the ribbon, its tab row and the status bar under
 // html.vound-review.
 import type { Editor } from '@tiptap/core'
-import { keydownHandler } from '@tiptap/pm/keymap'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
+import { clipboardText } from './pasteText'
+import { blockedInReview, isMacPlatform, keepsNativeAction } from './reviewShortcuts'
 
 export const reviewModeKey = new PluginKey('voundReviewMode')
 
@@ -14,19 +17,6 @@ function insertPlainText(view: EditorView, text: string) {
   if (text) view.dispatch(view.state.tr.insertText(text).scrollIntoView())
   return true
 }
-
-/** The clipboard's text, from text/plain or else the text of its HTML. */
-function clipboardText(data: DataTransfer) {
-  const plain = data.getData('text/plain')
-  const text = plain || (new DOMParser().parseFromString(data.getData('text/html'), 'text/html').body.textContent ?? '')
-  return text.replace(/\r\n?/g, '\n')
-}
-
-const swallow = () => true
-// bold, italic, underline and the four paragraph alignments
-const formattingShortcuts = keydownHandler(
-  Object.fromEntries(['Mod-b', 'Mod-i', 'Mod-u', 'Mod-e', 'Mod-l', 'Mod-r', 'Mod-j'].map((key) => [key, swallow])),
-)
 
 export const reviewModePlugin = new Plugin({
   key: reviewModeKey,
@@ -40,20 +30,37 @@ export const reviewModePlugin = new Plugin({
         return insertPlainText(view, clipboardText(event.clipboardData))
       },
     },
-    // pastes that skip the DOM event (view.pasteHTML, the app's paste-options chip) arrive here as a slice
-    handlePaste: (view, _event, slice) => insertPlainText(view, slice.content.textBetween(0, slice.content.size, '\n')),
-    handleKeyDown: formattingShortcuts,
+    // A paste that skips the DOM event (view.pasteHTML) meets the app's direct handlePaste first and lands
+    // here only when that one declines. Review mode closes the app's own ways in (the paste-options chip is
+    // hidden, its context menu does not open); this keeps any remaining one plain. Hard breaks become line feeds.
+    handlePaste: (view, _event, slice) => insertPlainText(view, slice.content.textBetween(0, slice.content.size, '\n', '\n')),
   },
 })
 
-/** Marks the page for host.css and registers the plugin once, ahead of the editor's own keymaps. */
+// Window capture runs before every other listener: the editors' keymaps (the main editor, header and footer,
+// text boxes) and App.tsx's window keydown handler, which acts without looking at defaultPrevented.
+function blockShortcut(event: KeyboardEvent) {
+  const mac = isMacPlatform()
+  if (!blockedInReview(event, mac)) return
+  event.stopPropagation()
+  if (!keepsNativeAction(event, mac)) event.preventDefault()
+}
+// The app opens its menu from a React contextmenu handler; stopping the event before it keeps the browser's.
+const keepAppMenuShut = (event: MouseEvent) => event.stopPropagation()
+
+/** Marks the page for host.css, registers the plugin once and blocks the shortcuts and the app's menu. */
 export function enterReviewMode(editor: Editor): void {
   document.documentElement.classList.add('vound-review')
+  // the same listener added twice is one listener
+  window.addEventListener('keydown', blockShortcut, true)
+  window.addEventListener('contextmenu', keepAppMenuShut, true)
   if (!reviewModeKey.get(editor.state)) editor.registerPlugin(reviewModePlugin, (plugin, plugins) => [plugin, ...plugins])
 }
 
 /** Back to the plain embedded editor, for a vound:open without review mode. */
 export function leaveReviewMode(editor: Editor): void {
   document.documentElement.classList.remove('vound-review')
+  window.removeEventListener('keydown', blockShortcut, true)
+  window.removeEventListener('contextmenu', keepAppMenuShut, true)
   if (reviewModeKey.get(editor.state)) editor.unregisterPlugin(reviewModeKey)
 }

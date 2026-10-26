@@ -23,7 +23,8 @@ let view: EditorView | null = null
 let editor: Editor | null = null
 afterEach(() => {
   view?.destroy(); view = null
-  editor?.destroy(); editor = null
+  if (editor) { leaveReviewMode(editor); editor.view.dom.remove(); editor.destroy() }
+  editor = null
   document.documentElement.classList.remove('vound-review')
 })
 
@@ -52,6 +53,12 @@ describe('reviewModePlugin', () => {
     expect(runs(v)).toEqual([{ text: 'Ort: Berlin\nMitte', marks: [{ bold: null, font: 'Arial' }] }])
   })
 
+  it('a pasted line break survives as a line feed', () => {
+    const v = reviewView()
+    v.pasteHTML('<p>Berlin<br>Mitte</p>')
+    expect(runs(v)).toEqual([{ text: 'Ort: Berlin\nMitte', marks: [{ bold: null, font: 'Arial' }] }])
+  })
+
   it("a paste event is handled before the app's own paste handlers", () => {
     const appPaste = vi.fn(() => true)
     const v = reviewView({ handlePaste: appPaste })
@@ -63,15 +70,21 @@ describe('reviewModePlugin', () => {
     expect(event.defaultPrevented).toBe(true)
     expect(runs(v)).toEqual([{ text: 'Ort: Berlin\nMitte', marks: [{ bold: null, font: 'Arial' }] }])
   })
+
+  it('an HTML-only clipboard pastes one line per block', () => {
+    const v = reviewView()
+    const event = new Event('paste', { bubbles: true, cancelable: true })
+    const html = '<div>\n  <p><b>Berlin</b></p>\n  <ul><li>Mitte</li><li>Nord<br>Ost</li></ul>\n</div>'
+    Object.defineProperty(event, 'clipboardData', { value: { getData: (type: string) => (type === 'text/html' ? html : '') } })
+    v.dom.dispatchEvent(event)
+    expect(runs(v)).toEqual([{ text: 'Ort: Berlin\nMitte\nNord\nOst', marks: [{ bold: null, font: 'Arial' }] }])
+  })
 })
 
 // the platform's Mod key as prosemirror-keymap and tiptap resolve it
 const mod = /Mac|iP(hone|[oa]d)/.test(navigator.platform) ? { metaKey: true } : { ctrlKey: true }
-const press = (target: Editor, key: string, modifiers: KeyboardEventInit = mod) => {
-  const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...modifiers })
-  target.view.dom.dispatchEvent(event)
-  return event.defaultPrevented
-}
+const press = (target: Editor, key: string, modifiers: KeyboardEventInit = mod) =>
+  target.view.dom.dispatchEvent(new KeyboardEvent('keydown', { key, code: `Key${key.toUpperCase()}`, bubbles: true, cancelable: true, ...modifiers }))
 const markNames = (target: Editor) => {
   const names = new Set<string>()
   target.state.doc.descendants((node) => { node.marks.forEach((m) => names.add(m.type.name)) })
@@ -79,36 +92,66 @@ const markNames = (target: Editor) => {
 }
 
 describe('enterReviewMode', () => {
+  // a stand-in for App.tsx's window keydown handler: it edits on ⌘E without looking at defaultPrevented
+  let appShortcuts: ((e: KeyboardEvent) => void) | null = null
+  afterEach(() => { if (appShortcuts) window.removeEventListener('keydown', appShortcuts); appShortcuts = null })
   const tiptap = () => {
-    editor = new Editor({ element: document.createElement('div'), extensions: [Document, Paragraph, Text, Bold, Italic, Underline], content: '<p>Hallo Welt</p>' })
-    editor.commands.setTextSelection({ from: 1, to: 6 })
-    return editor
+    const ed = new Editor({ element: document.createElement('div'), extensions: [Document, Paragraph, Text, Bold, Italic, Underline], content: '<p>Hallo Welt</p>' })
+    editor = ed
+    document.body.append(ed.view.dom)
+    ed.commands.setTextSelection({ from: 1, to: 6 })
+    appShortcuts = vi.fn((e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key === 'e') ed.commands.insertContentAt(1, 'Mitte ') })
+    window.addEventListener('keydown', appShortcuts)
+    return ed
   }
 
-  it('Mod-b, Mod-i, Mod-u are swallowed in review mode', () => {
+  it('formatting shortcuts reach neither the editor keymaps nor the app in review mode', () => {
     const ed = tiptap()
-    // control: outside review mode the editor's own keymap bolds the selection
+    // control: outside review mode the editor's keymap bolds and the app's handler edits
     press(ed, 'b')
     expect(markNames(ed)).toEqual(['bold'])
     press(ed, 'b')
-    expect(markNames(ed)).toEqual([])
+    press(ed, 'e')
+    expect(ed.getText()).toBe('Mitte Hallo Welt')
+    expect(appShortcuts).toHaveBeenCalledTimes(3)
+    const before = ed.state.doc
 
     enterReviewMode(ed)
-    for (const key of ['b', 'i', 'u']) expect(press(ed, key)).toBe(true)
-    expect(markNames(ed)).toEqual([])
-    // alignment shortcuts too, and nothing else
-    for (const key of ['e', 'l', 'r', 'j']) expect(press(ed, key)).toBe(true)
-    expect(press(ed, 'z')).toBe(false)
-    expect(press(ed, 'b', {})).toBe(false)
+    for (const key of ['b', 'i', 'u', 'e', 'l', 'r', 'j']) press(ed, key)
+    expect(ed.state.doc.eq(before)).toBe(true)
+    expect(appShortcuts).toHaveBeenCalledTimes(3)
+    // undo, copy and plain typing keys still travel
+    press(ed, 'z')
+    press(ed, 'c')
+    press(ed, 'e', {})
+    expect(appShortcuts).toHaveBeenCalledTimes(6)
   })
 
-  it('marks the page, registers the plugin once and ahead of the keymaps, and leaves again', () => {
+  it("the app's context menu stays shut in review mode, the browser's own one opens", () => {
+    const ed = tiptap()
+    const appMenu = vi.fn()
+    document.body.addEventListener('contextmenu', appMenu)
+    const rightClick = () => {
+      const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+      ed.view.dom.dispatchEvent(event)
+      return event
+    }
+    enterReviewMode(ed)
+    const event = rightClick()
+    expect(appMenu).not.toHaveBeenCalled()
+    expect(event.defaultPrevented).toBe(false)
+    leaveReviewMode(ed)
+    rightClick()
+    expect(appMenu).toHaveBeenCalledTimes(1)
+    document.body.removeEventListener('contextmenu', appMenu)
+  })
+
+  it('marks the page, registers the plugin once, and leaves again', () => {
     const ed = tiptap()
     enterReviewMode(ed)
     enterReviewMode(ed)
     expect(document.documentElement.classList.contains('vound-review')).toBe(true)
     expect(ed.state.plugins.filter((p) => p === reviewModePlugin)).toHaveLength(1)
-    expect(ed.state.plugins[0]).toBe(reviewModePlugin)
 
     leaveReviewMode(ed)
     expect(document.documentElement.classList.contains('vound-review')).toBe(false)
