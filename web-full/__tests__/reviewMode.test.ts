@@ -7,11 +7,13 @@ import Italic from '@tiptap/extension-italic'
 import Paragraph from '@tiptap/extension-paragraph'
 import Text from '@tiptap/extension-text'
 import Underline from '@tiptap/extension-underline'
-import { EditorState, TextSelection } from '@tiptap/pm/state'
+import { baseKeymap } from '@tiptap/pm/commands'
+import { keymap } from '@tiptap/pm/keymap'
+import { EditorState, NodeSelection, TextSelection, type Plugin } from '@tiptap/pm/state'
 import { EditorView, type EditorProps } from '@tiptap/pm/view'
 import { fieldReportingKey } from '../fieldReporting'
 import { enterReviewMode, leaveReviewMode, reviewModeKey, reviewModePlugin } from '../reviewMode'
-import { doc, schema } from './markerSchema'
+import { doc, fieldPara, para, schema } from './markerSchema'
 
 // jsdom has no ClipboardEvent; ProseMirror's pasteHTML creates one when it is not given an event
 beforeAll(() => {
@@ -167,5 +169,53 @@ describe('enterReviewMode', () => {
     expect(fieldReportingKey.get(ed.state)).toBeUndefined()
     press(ed, 'b')
     expect(markNames(ed)).toEqual(['bold'])
+  })
+})
+
+describe('a field block selected as a whole in review mode', () => {
+  /** "Firma:" and a form field selected as an object, as a click on it leaves it */
+  function selectedField(plugins: Plugin[]) {
+    const start = doc(para(0, 'Firma:'), fieldPara(1, 'Muster GmbH'))
+    const state = EditorState.create({ schema, doc: start, plugins: [...plugins, keymap(baseKeymap)] })
+    view = new EditorView(document.createElement('div'), { state: state.apply(state.tr.setSelection(NodeSelection.create(state.doc, start.child(0).nodeSize))) })
+    return view
+  }
+  const fieldKept = (v: EditorView) => v.state.doc.childCount === 2 && v.state.doc.child(1).attrs.fieldDisplay?.left === 'Muster GmbH'
+  const typeText = (v: EditorView, text: string) =>
+    v.someProp('handleTextInput', (f) => f(v, v.state.selection.from, v.state.selection.to, text, () => v.state.tr.insertText(text)))
+  const key = (v: EditorView, name: string) => {
+    const event = new KeyboardEvent('keydown', { key: name, code: name, bubbles: true, cancelable: true })
+    v.dom.dispatchEvent(event)
+    return event
+  }
+
+  it('without review mode a key replaces the block (the control)', () => {
+    const v = selectedField([])
+    key(v, 'Backspace')
+    expect(fieldKept(v)).toBe(false)
+  })
+
+  it('refuses typing, Backspace, Delete, paste and cut over it', () => {
+    const v = selectedField([reviewModePlugin])
+    expect(typeText(v, 'x')).toBe(true)
+    expect(key(v, 'Backspace').defaultPrevented).toBe(true)
+    expect(key(v, 'Delete').defaultPrevented).toBe(true)
+    v.pasteHTML('<p>Beispiel</p>')
+    for (const type of ['paste', 'cut']) {
+      const event = new Event(type, { bubbles: true, cancelable: true })
+      Object.defineProperty(event, 'clipboardData', { value: { getData: () => 'Beispiel', setData: () => {}, clearData: () => {} } })
+      v.dom.dispatchEvent(event)
+      expect(event.defaultPrevented).toBe(true)
+    }
+    expect(fieldKept(v)).toBe(true)
+    expect(v.state.selection).toBeInstanceOf(NodeSelection)
+  })
+
+  it('leaves typing in a text selection alone', () => {
+    const v = selectedField([reviewModePlugin])
+    v.dispatch(v.state.tr.setSelection(TextSelection.create(v.state.doc, 7)))
+    expect(typeText(v, 'x')).toBeFalsy()
+    // a collapsed caret's Backspace is the browser's own deletion: nothing takes the key
+    expect(key(v, 'Backspace').defaultPrevented).toBe(false)
   })
 })

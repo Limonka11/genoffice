@@ -1,17 +1,18 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { EditorState, TextSelection } from '@tiptap/pm/state'
+import { EditorState, NodeSelection, Plugin, TextSelection } from '@tiptap/pm/state'
 import { EditorView } from '@tiptap/pm/view'
 import type { EditorToHost, SlotMarker } from '../embed-protocol'
 import { fieldReportingPlugin } from '../fieldReporting'
-import { applyFieldValue } from '../fieldWrite'
+import { applyFieldValue, HOST_WRITE_META, placeCaret } from '../fieldWrite'
 import { markersPlugin, setMarkers } from '../markersPlugin'
-import { doc, para, paragraphs, schema } from './markerSchema'
+import { fieldNodeView } from './fieldNodeView'
+import { doc, fieldPara, para, paragraphs, schema } from './markerSchema'
 
 const marker = (id: string, paragraph: number): SlotMarker => ({ id, paragraph, scope: 'paragraph', tone: 'gap', label: id, actions: [] })
 
 let view: EditorView | null = null
-afterEach(() => { view?.destroy(); view = null })
+afterEach(() => { view?.dom.remove(); view?.destroy(); view = null })
 
 /** paragraphs 0..4; "ort" and "datum" share paragraph 1, "name" marks paragraph 3 */
 function reportingView() {
@@ -28,9 +29,9 @@ const inside = (v: EditorView, index: number, offset = 0) => {
   return found
 }
 const caretTo = (v: EditorView, pos: number) => v.dispatch(v.state.tr.setSelection(TextSelection.create(v.state.doc, pos)))
-const pressTab = (v: EditorView) => {
-  const event = new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', bubbles: true, cancelable: true })
-  v.dom.dispatchEvent(event)
+const pressTab = (v: EditorView, init: KeyboardEventInit = {}, target: Element = v.dom) => {
+  const event = new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', bubbles: true, cancelable: true, ...init })
+  target.dispatchEvent(event)
   return event
 }
 const sent = (post: ReturnType<typeof vi.fn>, type: EditorToHost['type']) =>
@@ -108,5 +109,98 @@ describe('fieldReportingPlugin', () => {
     caretTo(view, inside(view, 2, 1))
     setMarkers(view, [marker('name', 2)])
     expect(sent(post, 'vound:caretBlock')).toEqual([{ type: 'vound:caretBlock', ids: ['name'] }])
+  })
+
+  it('Shift+Tab does nothing and reports nothing', () => {
+    const { v, post } = reportingView()
+    caretTo(v, inside(v, 1, 2))
+    post.mockClear()
+    const before = v.state.doc
+    expect(pressTab(v, { shiftKey: true }).defaultPrevented).toBe(true)
+    expect(v.state.doc.eq(before)).toBe(true)
+    expect(post).not.toHaveBeenCalled()
+  })
+
+  it('reports a marked paragraph joined into its predecessor', () => {
+    const { v, post } = reportingView()
+    // Backspace at the start of paragraph 3 ("name") joins it into paragraph 2; its marker goes with it
+    v.dispatch(v.state.tr.join(inside(v, 3) - 1))
+    expect(v.state.doc.childCount).toBe(4)
+    expect(sent(post, 'vound:blockEdited')).toEqual([{ type: 'vound:blockEdited', ids: ['name'] }])
+  })
+
+  it('does not report a transaction appended to a host write', () => {
+    const post = vi.fn<(msg: EditorToHost) => void>()
+    // a plugin that stamps something into the written paragraph after every host write, as app plugins may
+    const stamp = new Plugin({
+      appendTransaction: (trs, _old, state) => (trs.some((tr) => tr.getMeta(HOST_WRITE_META)) ? state.tr.insertText('!', 2) : null),
+    })
+    const state = EditorState.create({ schema, doc: doc(...paragraphs(0, 3)), plugins: [markersPlugin, stamp, fieldReportingPlugin(post)] })
+    view = new EditorView(document.createElement('div'), { state })
+    setMarkers(view, [marker('name', 0)])
+    expect(applyFieldValue(view, { block: { paragraph: 0, scope: 'paragraph' }, previous: 'paragraph 0', value: 'Muster' })).toEqual({ ok: true })
+    expect(view.state.doc.child(0).textContent).toBe('M!uster')
+    expect(sent(post, 'vound:blockEdited')).toEqual([])
+  })
+
+  it('forgets the reported block when another document replaces the whole document', () => {
+    const { v, post } = reportingView()
+    caretTo(v, inside(v, 1, 2))
+    // the opened document arrives (its markers are rebuilt on it, markersPlugin.ts)
+    v.dispatch(v.state.tr.replaceWith(0, v.state.doc.content.size, paragraphs(0, 5)))
+    post.mockClear()
+    // the caret in the same paragraph of the new document is news to the host
+    caretTo(v, inside(v, 1, 2))
+    expect(sent(post, 'vound:caretBlock')).toEqual([{ type: 'vound:caretBlock', ids: ['ort', 'datum'] }])
+  })
+})
+
+describe('fieldReportingPlugin in a field passthrough', () => {
+  /** a field passthrough (paragraph 1, "firma") between two paragraphs, rendered by the field node view */
+  function fieldView() {
+    const post = vi.fn<(msg: EditorToHost) => void>()
+    const mount = document.createElement('div')
+    document.body.append(mount)
+    const state = EditorState.create({
+      schema,
+      doc: doc(para(0, 'Firma:'), fieldPara(1, 'Muster GmbH'), para(2, 'Ort:')),
+      plugins: [markersPlugin, fieldReportingPlugin(post)],
+    })
+    view = new EditorView(mount, { state, nodeViews: { docProtected: fieldNodeView } })
+    setMarkers(view, [marker('firma', 1)])
+    return { v: view, post }
+  }
+
+  it('reports the caret in a field being edited, commits on Tab, then reports the edit and leaving by Tab', () => {
+    const { v, post } = fieldView()
+    expect(placeCaret(v, { paragraph: 1, scope: 'paragraph' })).toBe(true)
+    expect(sent(post, 'vound:caretBlock')).toEqual([{ type: 'vound:caretBlock', ids: ['firma'] }])
+
+    // typing inside the node view: the DOM changes, the document only on commit
+    const text = v.dom.querySelector('.doc-field-text')!
+    text.textContent = 'Beispiel AG'
+    post.mockClear()
+    const tab = pressTab(v, {}, text)
+    // the node view keeps ProseMirror's own keydown handling out; the browser would move the focus
+    expect(tab.defaultPrevented).toBe(true)
+    expect(v.state.doc.child(1).attrs.fieldDisplay.left).toBe('Beispiel AG')
+    expect(post.mock.calls.map(([msg]) => msg)).toEqual([
+      { type: 'vound:blockEdited', ids: ['firma'] },
+      { type: 'vound:caretBlock', ids: [], leftWith: 'Tab' },
+    ])
+  })
+
+  it('Shift+Tab in a field being edited keeps the focus and reports nothing', () => {
+    const { v, post } = fieldView()
+    placeCaret(v, { paragraph: 1, scope: 'paragraph' })
+    post.mockClear()
+    expect(pressTab(v, { shiftKey: true }, v.dom.querySelector('.doc-field-text')!).defaultPrevented).toBe(true)
+    expect(post).not.toHaveBeenCalled()
+  })
+
+  it('a field selected as an object counts as the caret in its block', () => {
+    const { v, post } = fieldView()
+    v.dispatch(v.state.tr.setSelection(NodeSelection.create(v.state.doc, v.state.doc.child(0).nodeSize)))
+    expect(sent(post, 'vound:caretBlock')).toEqual([{ type: 'vound:caretBlock', ids: ['firma'] }])
   })
 })

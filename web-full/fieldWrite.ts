@@ -5,27 +5,30 @@
 // transaction, so it saves the way typing does; it carries HOST_WRITE_META so edit reporting
 // (fieldReporting.ts) does not count it as the reviewer's edit.
 import type { Node as PmNode } from '@tiptap/pm/model'
-import { NodeSelection, Selection, TextSelection, type Transaction } from '@tiptap/pm/state'
+import { Selection, TextSelection, type Transaction } from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
 import type { BlockRef, FieldValueRefusal } from './embed-protocol'
 import { locateBlock } from './markers'
 
 /** transaction meta on every host write: not a user edit */
 export const HOST_WRITE_META = 'voundHostWrite'
+/** the element of a field passthrough's node view that holds its result text (protected-render.ts) */
+export const FIELD_TEXT_SELECTOR = '.doc-field-text'
 
 export type FieldValueResult = { ok: true } | { ok: false; reason: FieldValueRefusal }
 export type FieldValueWrite = { block: BlockRef; previous: string; value: string }
 
 /** One piece of a block's visible text: a paragraph's text, a field passthrough's result text
- *  (fieldDisplay.left, which the editor saves into the field result), or text the editor cannot edit
- *  (a table-of-contents line, a chart caption). */
+ *  (fieldDisplay.left, which the editor saves into the field result), or field text this rule leaves
+ *  alone (a table-of-contents line, a chart caption). */
 type TextUnit = { kind: 'text' | 'field' | 'fixed'; pos: number; node: PmNode; text: string }
 
 function unitOf(node: PmNode, pos: number): TextUnit {
   if (node.isTextblock) return { kind: 'text', pos, node, text: node.textContent }
   const display = node.attrs.fieldDisplay
   const text = typeof display?.left === 'string' ? display.left : ''
-  // the same fields the editor's own field editing leaves alone (extensions.ts, wireFieldEditing)
+  // only plain text results: the editor also edits TOC lines (title and page number), which this rule
+  // refuses to be safe, and never chart captions
   const editable = display?.kind === 'text' && !node.attrs.chartDisplay
   return { kind: editable ? 'field' : 'fixed', pos, node, text }
 }
@@ -89,11 +92,17 @@ function textRange(unit: TextUnit, from: number, to: number) {
   return { fromPos, toPos }
 }
 
+/** A field display with a new result text. The formatted runs describe the old text (the editor's own field
+ *  commit drops them too). An empty result is shown as the field's empty line: without it the editor renders
+ *  no result element, and the field could not be typed into again. */
+function withResult(display: Record<string, unknown>, left: string) {
+  const { runs: _staleRuns, emptyLine: _emptyLine, ...kept } = display
+  return left === '' ? { ...kept, left, emptyLine: true } : { ...kept, left }
+}
+
 function replaceInUnit(tr: Transaction, unit: TextUnit, from: number, to: number, value: string) {
   if (unit.kind === 'field') {
-    const display = { ...unit.node.attrs.fieldDisplay, left: unit.text.slice(0, from) + value + unit.text.slice(to) }
-    // the formatted runs describe the old text; the editor's own field commit drops them the same way
-    delete display.runs
+    const display = withResult(unit.node.attrs.fieldDisplay, unit.text.slice(0, from) + value + unit.text.slice(to))
     return tr.setNodeMarkup(unit.pos, undefined, { ...unit.node.attrs, fieldDisplay: display })
   }
   const { fromPos, toPos } = textRange(unit, from, to)
@@ -103,18 +112,30 @@ function replaceInUnit(tr: Transaction, unit: TextUnit, from: number, to: number
 
 type Planned = { unit: TextUnit; from: number; to: number } | { refused: FieldValueRefusal }
 
+/** The single match of `needle` inside a field passthrough's result. The editor shows a field's result trimmed
+ *  (parse-fields.ts), so the whitespace around the host's previous text may be gone; an empty legacy field's
+ *  result is whitespace only and shows as an empty result. */
+function trimmedFieldMatch(units: TextUnit[], needle: string): Planned {
+  const fields = units.filter((unit) => unit.kind === 'field')
+  const matches =
+    needle === ''
+      ? fields.filter((unit) => unit.text === '').map((unit) => ({ unit, from: 0, to: 0 }))
+      : fields.flatMap((unit) => occurrences(unit.text, needle).map((from) => ({ unit, from, to: from + needle.length })))
+  if (matches.length === 0) return { refused: 'absent' }
+  return matches.length === 1 ? matches[0] : { refused: 'ambiguous' }
+}
+
 /** where the rule puts the value, or why it refuses */
 function plan(units: TextUnit[], isCell: boolean, previous: string): Planned {
-  const joined = units.map((unit) => unit.text).join('\n')
-  if (previous === '') {
-    // an empty cell takes the value in its first paragraph; nothing else is written without previous text
-    if (!isCell || units.some((unit) => unit.text !== '')) return { refused: 'absent' }
+  if (previous === '' && isCell && units.every((unit) => unit.text === '')) {
+    // an empty cell takes the value in its first paragraph
     return units[0] ? { unit: units[0], from: 0, to: 0 } : { refused: 'notEditable' }
   }
-  const starts = occurrences(joined, previous)
-  if (starts.length === 0) return { refused: 'absent' }
+  const joined = units.map((unit) => unit.text).join('\n')
+  const starts = previous === '' ? [] : occurrences(joined, previous)
   if (starts.length > 1) return { refused: 'ambiguous' }
-  return unitAt(units, starts[0], starts[0] + previous.length) ?? { refused: 'notEditable' }
+  if (starts.length === 1) return unitAt(units, starts[0], starts[0] + previous.length) ?? { refused: 'notEditable' }
+  return trimmedFieldMatch(units, previous.trim())
 }
 
 /** vound:setFieldValue: write the value into the block, or refuse and leave the document as it is */
@@ -130,19 +151,41 @@ export function applyFieldValue(view: EditorView, write: FieldValueWrite): Field
   return { ok: true }
 }
 
-/** a caret at the end of a paragraph's text, or the whole node for a field passthrough */
-function caretIn(doc: PmNode, unit: TextUnit): Selection {
-  if (unit.kind === 'text') return TextSelection.create(doc, unit.pos + unit.node.nodeSize - 1)
-  return NodeSelection.create(doc, unit.pos)
+/** a text caret next to a block, never a NodeSelection on it: with one, the next key would replace the block */
+const besideBlock = (view: EditorView, unit: TextUnit) =>
+  Selection.findFrom(view.state.doc.resolve(unit.pos + unit.node.nodeSize), 1, true) ??
+  Selection.findFrom(view.state.doc.resolve(unit.pos), -1, true) ??
+  view.state.selection
+
+/** Into a field passthrough's text the way a double click gets there (extensions.ts,
+ *  wireProtectedInteractionMode): the node view starts editing, and the DOM caret goes to the end of the
+ *  result, or selects the placeholder of an empty one so typing replaces it. Typing there stays in the node
+ *  view until the editor commits the field; ProseMirror's own selection moves next to the block. */
+function enterFieldEditing(view: EditorView, unit: TextUnit) {
+  const dom = view.nodeDOM(unit.pos)
+  const text = dom instanceof HTMLElement ? dom.querySelector(FIELD_TEXT_SELECTOR) : null
+  if (!(text instanceof HTMLElement)) return false
+  text.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }))
+  text.focus()
+  const range = text.ownerDocument.createRange()
+  range.selectNodeContents(text)
+  if (!unit.node.attrs.fieldDisplay.emptyLine) range.collapse(false)
+  const selection = text.ownerDocument.getSelection()
+  selection?.removeAllRanges()
+  selection?.addRange(range)
+  view.dispatch(view.state.tr.setSelection(besideBlock(view, unit)))
+  return true
 }
 
 /** vound:placeCaret: the caret at the end of the block's text (a cell's last paragraph), focused and
- *  scrolled into view; false when the block is not found */
+ *  scrolled into view, or inside a field passthrough's result; false when the block is not found or has
+ *  no text to put a caret in */
 export function placeCaret(view: EditorView, block: BlockRef): boolean {
   const located = locateBlock(view.state.doc, block)
   const last = located ? unitsOf(located.node, located.pos).at(-1) : undefined
-  if (!last) return false
-  view.dispatch(view.state.tr.setSelection(caretIn(view.state.doc, last)).scrollIntoView())
+  if (!last || last.kind === 'fixed') return false
+  if (last.kind === 'field') return enterFieldEditing(view, last)
+  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, last.pos + last.node.nodeSize - 1)).scrollIntoView())
   view.focus()
   return true
 }

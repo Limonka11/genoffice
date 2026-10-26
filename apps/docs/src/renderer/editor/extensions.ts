@@ -6286,6 +6286,13 @@ function wireFieldEditing(
       // the formatted runs describe the pre-edit text: an edited result renders
       // as the plain string (a rebuild would otherwise redraw the stale runs)
       if (next.left !== currentField.left) delete next.runs
+      // an empty result shows one placeholder NBSP on its empty line: typed text
+      // replaces it, and the line draws the text again (an empty line always
+      // draws the placeholder)
+      if (currentField.emptyLine && next.left) {
+        next.left = next.left.replace(/^\u00a0|\u00a0$/, '')
+        delete next.emptyLine
+      }
     }
     if (JSON.stringify(next) === JSON.stringify(currentField)) return
     const pos = getPos()

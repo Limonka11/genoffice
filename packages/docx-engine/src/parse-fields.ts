@@ -287,7 +287,9 @@ export function fieldDisplayOf(
   if (visible === '' && /<w:br\s[^>]*w:type="page"/.test(xml)) {
     return { kind: 'pageBreak' }
   }
-  if (visible === '' && loneFieldEnd(xml)) {
+  // a lone field end, or an empty legacy text form field (Word fills its result with en spaces): both
+  // show as an empty line, and the form field stays a text field one can type into
+  if (visible === '' && (loneFieldEnd(xml) || blankFormTextField(xml))) {
     // the paragraph mark's size sets the empty line (the end run's rPr does not)
     const sz = directSize(eff.mark)
     return {
@@ -414,6 +416,17 @@ const FIELD_LABELS: Record<string, string> = {
 
 /** A paragraph whose only field machinery closes a field begun earlier (TOC end
  *  split off into its own paragraph); no run of its own, so Word lays an empty line. */
+/** One legacy text form field whose result is whitespace only and is held in w:t text, with no line
+ *  break or tab: typed text replaces that whitespace in the result's text nodes (patchFieldParagraphXml). */
+export function blankFormTextField(xml: string): boolean {
+  return (
+    (xml.match(/fldCharType=["']begin["']/g)?.length ?? 0) === 1 &&
+    /<w:instrText\b[^>]*>\s*FORMTEXT\s*<\/w:instrText>/.test(xml) &&
+    /<w:t[\s>]/.test(xml) &&
+    !/<w:(?:tab|br|cr)\b/.test(xml.replace(/<w:tabs>[\s\S]*?<\/w:tabs>/g, ''))
+  )
+}
+
 export function loneFieldEnd(xml: string): boolean {
   const ends = xml.match(/fldCharType=["']end["']/g)?.length ?? 0
   return (

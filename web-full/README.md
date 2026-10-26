@@ -131,14 +131,23 @@ replace the reviewed document.
 
 Review mode reports the reviewer's work in marked blocks (`fieldReporting.ts`). `vound:blockEdited`
 follows a transaction of theirs that changes a marked block (a paragraph or cell carrying a marker
-decoration), with the ids of every block it touched; host writes, document opens and changes kept out of
-the undo history (the app's TOC, pagination and formatting refreshes) are not reported, and neither is a
-paragraph added or removed between two marked blocks. `vound:caretBlock` follows the caret: the ids of
-the marked block it entered, or `ids: []` with `leftWith: 'other'` when it left one. Tab neither indents,
-inserts a tab nor moves to the next table cell; in a marked block it reports `ids: []` with
-`leftWith: 'Tab'`, the host's cue to move to the next field. Typing in a field passthrough paragraph (a
-legacy form field) reaches the document only when the editor commits the field edit (the caret leaves the
-field, or a save starts), so its `vound:blockEdited` comes then.
+decoration), with the ids of every block it touched, before or after the change (Backspace that joins a
+marked paragraph into the one above reports it). Not reported: host writes and transactions other plugins
+append to them, document opens, changes kept out of the undo history (the app's TOC, pagination and
+formatting refreshes), and a paragraph added or removed between two marked blocks. Select-all and typing
+replaces the whole document: that is not reported either, and it drops every marker; the host's
+skeleton check of the saved bytes catches it. `vound:caretBlock` follows the caret: the ids of the marked
+block it entered, or `ids: []` with `leftWith: 'other'` when it left one. Tab neither indents, inserts a
+tab nor moves to the next table cell; in a marked block it reports `ids: []` with `leftWith: 'Tab'`, the
+host's cue to move to the next field. Shift+Tab does nothing.
+
+A field passthrough paragraph (a legacy form field outside a table) is typed into inside its node view, out
+of ProseMirror's reach: its text reaches the document when the editor commits the field (the caret leaves
+the field, Tab, or a save starts), so its `vound:blockEdited` comes then. While the DOM caret is in a field
+being edited, the caret counts as in that field's block. Tab there is caught before the node view: it
+commits the field, so `vound:blockEdited` comes first, then reports leaving with Tab. A click on such a
+field selects it as an object; review mode then refuses typing, Backspace, Delete, paste and cut, which
+would replace the block, and the field with it, by plain text.
 
 ## Field writes
 
@@ -151,15 +160,23 @@ result text (`fieldDisplay.left`), and for a cell its paragraphs' texts joined w
   it is a text replacement in the formatting of the replaced text; inline leaves (breaks, images) at its
   edges stay. In a field passthrough it rewrites `left` and drops the stale formatted `runs`, as the
   editor's own field editing does; the save writes it into the field's result.
+- A field passthrough shows its result trimmed, and an empty legacy field's result is whitespace only (en
+  spaces, NBSP): when `previous` does not occur as sent, its trimmed text is looked for in the block's field
+  results, and a whitespace-only or empty `previous` matches the one empty field result. An emptied field
+  shows as its empty line, so it can be typed into and written again. A paragraph keeps the whitespace of
+  a field result as text, so there `previous` matches as sent.
 - `previous` is empty and the block is a cell with no text: `value` goes into its first paragraph.
-- Otherwise the document is untouched: `absent` (no occurrence, or an empty `previous` anywhere but an
-  empty cell), `ambiguous` (several, overlapping ones included), `notEditable` (the occurrence spans two
-  paragraphs of a cell, or lies in text the editor cannot edit, such as a table-of-contents line).
+- Otherwise the document is untouched: `absent` (no occurrence, or an empty `previous` in a paragraph),
+  `ambiguous` (several, overlapping ones included), `notEditable` (the occurrence spans two paragraphs of
+  a cell, or lies in a table-of-contents line, which this rule leaves alone).
 
 Every write is one transaction with the meta `voundHostWrite` (`HOST_WRITE_META`), so it is undoable
 and marks the document dirty like typing, but is never reported as `vound:blockEdited`.
-`vound:placeCaret` puts a text caret at the end of a paragraph (a cell's last paragraph) or selects a field
-passthrough paragraph as a whole, then focuses the editor and scrolls the caret into view.
+`vound:placeCaret` puts a text caret at the end of a paragraph (a cell's last paragraph), focuses the
+editor and scrolls the caret into view. For a field passthrough it enters the field the way a double
+click does: the DOM caret goes to the end of the result (an empty result's placeholder is selected, so
+typing replaces it), and ProseMirror's selection moves next to the block, never a selection of the block
+itself.
 
 ## Develop
 

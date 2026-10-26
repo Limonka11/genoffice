@@ -4,8 +4,10 @@
 // not open, so its Paste entries cannot bypass the plain-text rule (the browser's menu opens instead, and
 // its Paste is an ordinary paste event). host.css hides the ribbon, its tab row and the status bar under
 // html.vound-review. Edits and caret moves in marked blocks are reported to the host (fieldReporting.ts).
+// A form field selected as a whole block (a click on it selects it as an object) cannot be typed, deleted,
+// pasted or cut over: that would replace the block, and with it the field, by plain text.
 import type { Editor } from '@tiptap/core'
-import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { NodeSelection, Plugin, PluginKey, type EditorState } from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
 import type { EditorToHost } from './embed-protocol'
 import { fieldReportingKey, fieldReportingPlugin } from './fieldReporting'
@@ -20,6 +22,19 @@ function insertPlainText(view: EditorView, text: string) {
   return true
 }
 
+/** a field passthrough (fieldDisplay) selected as a whole block */
+export const selectsFieldBlock = (state: EditorState) =>
+  state.selection instanceof NodeSelection && state.selection.node.attrs.fieldDisplay != null
+
+/** swallow an event that would replace a selected field block */
+function keepFieldBlock(view: EditorView, event: Event) {
+  if (!selectsFieldBlock(view.state)) return false
+  event.preventDefault()
+  return true
+}
+
+const deletesSelection = (event: KeyboardEvent) => event.key === 'Backspace' || event.key === 'Delete'
+
 export const reviewModePlugin = new Plugin({
   key: reviewModeKey,
   props: {
@@ -27,15 +42,21 @@ export const reviewModePlugin = new Plugin({
     // and some of them insert formatted content themselves. The DOM event reaches this plugin first.
     handleDOMEvents: {
       paste: (view, event) => {
+        if (keepFieldBlock(view, event)) return true
         if (!view.editable || !event.clipboardData) return false
         event.preventDefault()
         return insertPlainText(view, clipboardText(event.clipboardData))
       },
+      cut: keepFieldBlock,
     },
     // A paste that skips the DOM event (view.pasteHTML) meets the app's direct handlePaste first and lands
     // here only when that one declines. Review mode closes the app's own ways in (the paste-options chip is
     // hidden, its context menu does not open); this keeps any remaining one plain. Hard breaks become line feeds.
-    handlePaste: (view, _event, slice) => insertPlainText(view, slice.content.textBetween(0, slice.content.size, '\n', '\n')),
+    handlePaste: (view, _event, slice) =>
+      selectsFieldBlock(view.state) || insertPlainText(view, slice.content.textBetween(0, slice.content.size, '\n', '\n')),
+    handleTextInput: (view) => selectsFieldBlock(view.state),
+    handleKeyPress: (view) => selectsFieldBlock(view.state),
+    handleKeyDown: (view, event) => deletesSelection(event) && selectsFieldBlock(view.state),
   },
 })
 

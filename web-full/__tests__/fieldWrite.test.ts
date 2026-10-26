@@ -5,13 +5,16 @@ import { EditorView } from '@tiptap/pm/view'
 import type { Node as PmNode } from '@tiptap/pm/model'
 import type { BlockRef } from '../embed-protocol'
 import { applyFieldValue, HOST_WRITE_META, placeCaret } from '../fieldWrite'
+import { fieldNodeView } from './fieldNodeView'
 import { cell, doc, fieldPara, para, schema, table } from './markerSchema'
 
 let view: EditorView | null = null
-afterEach(() => { view?.destroy(); view = null })
+afterEach(() => { view?.dom.remove(); view?.destroy(); view = null })
 
 function viewOf(...blocks: PmNode[]) {
-  view = new EditorView(document.createElement('div'), { state: EditorState.create({ schema, doc: doc(...blocks) }) })
+  const mount = document.createElement('div')
+  document.body.append(mount)
+  view = new EditorView(mount, { state: EditorState.create({ schema, doc: doc(...blocks) }), nodeViews: { docProtected: fieldNodeView } })
   return view
 }
 const paragraphBlock = (paragraph: number): BlockRef => ({ paragraph, scope: 'paragraph' })
@@ -53,8 +56,32 @@ describe('applyFieldValue', () => {
     const field = v.state.doc.child(1)
     expect(field.attrs.docxPara).toBe(1)
     expect(field.attrs.styleId).toBe('Formular')
-    // the formatted runs describe the old text; the editor's own field commit drops them the same way
-    expect(field.attrs.fieldDisplay).toEqual({ kind: 'text', left: '', fontFamily: 'Arial' })
+    // the formatted runs describe the old text; the editor's own field commit drops them the same way. The
+    // emptied result shows as the field's empty line, so the field keeps an element to type into
+    expect(field.attrs.fieldDisplay).toEqual({ kind: 'text', left: '', fontFamily: 'Arial', emptyLine: true })
+    expect(v.nodeDOM(v.state.doc.child(0).nodeSize)?.textContent).toBe('\u00a0')
+
+    // restoring the value: the empty result matches an empty previous, and the empty line goes again
+    expect(write(v, paragraphBlock(1), '', 'Muster Ingenieure GmbH')).toEqual({ ok: true })
+    expect(v.state.doc.child(1).attrs.fieldDisplay).toEqual({ kind: 'text', left: 'Muster Ingenieure GmbH', fontFamily: 'Arial' })
+  })
+
+  it("matches an empty legacy field's whitespace result in both shapes the editor shows it", () => {
+    const enSpaces = '\u2002'.repeat(5)
+    // a paragraph keeps the en spaces of the field result as text
+    const v = viewOf(para(0, enSpaces), fieldPara(1, '', { emptyLine: true }), fieldPara(2, 'Muster GmbH'))
+    expect(write(v, paragraphBlock(0), enSpaces, '089 123')).toEqual({ ok: true })
+    expect(v.state.doc.child(0).textContent).toBe('089 123')
+    // a field passthrough shows its result trimmed: whitespace only is an empty result
+    expect(write(v, paragraphBlock(1), enSpaces, 'Beispiel AG')).toEqual({ ok: true })
+    expect(v.state.doc.child(1).attrs.fieldDisplay.left).toBe('Beispiel AG')
+    expect(v.state.doc.child(1).attrs.fieldDisplay.emptyLine).toBeUndefined()
+    // and the whitespace around a value is gone from it
+    expect(write(v, paragraphBlock(2), '\u00a0Muster GmbH ', 'X')).toEqual({ ok: true })
+    expect(v.state.doc.child(2).attrs.fieldDisplay.left).toBe('X')
+    // a whitespace-only previous in a paragraph without it stays absent
+    const plain = viewOf(para(0, 'Name'))
+    expect(write(plain, paragraphBlock(0), enSpaces, 'X')).toEqual({ ok: false, reason: 'absent' })
   })
 
   it('refuses when previous occurs twice', () => {
@@ -138,7 +165,7 @@ describe('applyFieldValue', () => {
 })
 
 describe('placeCaret', () => {
-  it('puts the caret at the end of a paragraph, selects a field passthrough, and ends in a cell\'s last paragraph', () => {
+  it("puts the caret at the end of a paragraph and ends in a cell's last paragraph", () => {
     const v = viewOf(para(0, 'Name: Muster'), fieldPara(1, 'Firma'), table(cell(para(2, 'a'), para(3, 'bc'))))
     v.focus = vi.fn()
 
@@ -147,15 +174,37 @@ describe('placeCaret', () => {
     expect(v.state.selection.from).toBe(1 + 'Name: Muster'.length)
     expect(v.focus).toHaveBeenCalled()
 
-    expect(placeCaret(v, paragraphBlock(1))).toBe(true)
-    expect(v.state.selection).toBeInstanceOf(NodeSelection)
-    expect(v.state.selection.from).toBe(v.state.doc.child(0).nodeSize)
-
     expect(placeCaret(v, cellBlock(2))).toBe(true)
     const $caret = v.state.selection.$from
     expect($caret.parent.attrs.docxPara).toBe(3)
     expect($caret.parentOffset).toBe(2)
 
     expect(placeCaret(v, paragraphBlock(7))).toBe(false)
+  })
+
+  it('enters a field passthrough the way a double click does, with no NodeSelection on it', () => {
+    const v = viewOf(para(0, 'Firma:'), fieldPara(1, 'Muster GmbH'), para(2, 'Ort:'))
+    // a click on the field selects it as an object, as in the editor
+    v.dispatch(v.state.tr.setSelection(NodeSelection.create(v.state.doc, v.state.doc.child(0).nodeSize)))
+
+    expect(placeCaret(v, paragraphBlock(1))).toBe(true)
+    const field = v.nodeDOM(v.state.doc.child(0).nodeSize)
+    const text = v.dom.querySelector('.doc-field-text')
+    expect(field instanceof HTMLElement && field.classList.contains('doc-content-editing')).toBe(true)
+    expect(text?.getAttribute('contenteditable')).toBe('true')
+    // the DOM caret at the end of the result
+    const range = document.getSelection()!.getRangeAt(0)
+    expect(range.collapsed).toBe(true)
+    expect(range.startContainer === text || text?.contains(range.startContainer)).toBe(true)
+    expect(range.startOffset).toBe(range.startContainer === text ? text.childNodes.length : 'Muster GmbH'.length)
+    // ProseMirror's selection moved next to the field: the next key cannot replace the block
+    expect(v.state.selection).not.toBeInstanceOf(NodeSelection)
+    expect(v.state.selection.$from.parent.attrs.docxPara).toBe(2)
+  })
+
+  it("selects an empty field's placeholder so typing replaces it", () => {
+    const v = viewOf(para(0, 'Firma:'), fieldPara(1, '', { emptyLine: true }))
+    expect(placeCaret(v, paragraphBlock(1))).toBe(true)
+    expect(document.getSelection()!.toString()).toBe('\u00a0')
   })
 })
