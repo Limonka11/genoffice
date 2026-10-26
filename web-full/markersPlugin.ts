@@ -42,7 +42,7 @@ function rebuild(doc: PmNode, state: MarkersState): MarkersState {
 }
 
 /** a step that replaced the whole document, as Tiptap's setContent does when a document opens */
-const replacedWholeDocument = (tr: Transaction) =>
+export const replacedWholeDocument = (tr: Transaction) =>
   tr.steps.some((step, index) => step instanceof ReplaceStep && step.from === 0 && step.to === tr.docs[index].content.size)
 
 /** a document change: map the decorations, and walk the document again only when mapping cannot be trusted */

@@ -2,7 +2,7 @@
 // view, so the matching rules are tested on a bare document (markersPlugin.ts applies them).
 import type { Node as PmNode } from '@tiptap/pm/model'
 import { Decoration } from '@tiptap/pm/view'
-import type { MarkerTone, SlotMarker } from './embed-protocol'
+import type { BlockRef, MarkerTone, SlotMarker } from './embed-protocol'
 
 export const MARKER_CLASS = 'vound-slot'
 export const CURRENT_CLASS = 'vound-slot-current'
@@ -47,11 +47,18 @@ function enclosingCell(doc: PmNode, pos: number): Located | null {
   return null
 }
 
-/** the node a marker highlights: its paragraph, or the cell around it for cell scope */
-function markerTarget(doc: PmNode, marker: SlotMarker, matches: Located[]) {
-  // a split copies docxPara to both halves: an index naming two nodes is ambiguous, so it is not marked
+/** the block a paragraph index and scope name: the paragraph, or the cell around it for cell scope */
+function blockTarget(doc: PmNode, scope: BlockRef['scope'], matches: Located[]) {
+  // a split copies docxPara to both halves: an index naming two nodes is ambiguous, so it names no block
   if (matches.length !== 1) return null
-  return marker.scope === 'cell' ? enclosingCell(doc, matches[0].pos) : matches[0]
+  return scope === 'cell' ? enclosingCell(doc, matches[0].pos) : matches[0]
+}
+
+/** the node a field write or caret placement targets, found as a marker on it would be; null when the
+ *  index names no node or several, or a cell scope finds no enclosing cell */
+export function locateBlock(doc: PmNode, block: BlockRef): Located | null {
+  const found = nodesByIndex(doc, new Set([block.paragraph]))
+  return blockTarget(doc, block.scope, found.get(block.paragraph) ?? [])
 }
 
 /** one node decoration for every slot on the node: "Ort: ___ Datum: ___" is one paragraph with two
@@ -77,7 +84,7 @@ export function markerDecorations(doc: PmNode, markers: SlotMarker[], currentId:
   const found = nodesByIndex(doc, new Set(markers.map((marker) => marker.paragraph)))
   const byNode = new Map<number, { target: Located; markers: SlotMarker[] }>()
   for (const marker of markers) {
-    const target = markerTarget(doc, marker, found.get(marker.paragraph) ?? [])
+    const target = blockTarget(doc, marker.scope, found.get(marker.paragraph) ?? [])
     if (!target) {
       dropped.push(marker.id)
       continue

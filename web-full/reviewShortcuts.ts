@@ -1,6 +1,7 @@
-// The keyboard shortcuts review mode blocks: the editor keymaps' bold, italic and underline, and every
+// The keyboard shortcuts review mode blocks: the editor keymaps' bold, italic and underline, every
 // formatting or document-tool shortcut App.tsx handles in its window keydown handler (which does not look
-// at defaultPrevented). Undo, redo, clipboard, select-all, save, find, zoom, navigation and typing pass.
+// at defaultPrevented), and File › Open, whose file would replace the reviewed document. Undo, redo,
+// clipboard, select-all, save, find, zoom, navigation and typing pass.
 // Matching mirrors App.tsx: Mod is Command or Control on every platform; letters it reads from e.key,
 // digits and punctuation from e.code.
 export type ShortcutKeys = Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey'>
@@ -16,6 +17,8 @@ const codes = (base: Combo, ...list: string[]): Combo[] => list.map((code) => ({
 const combos = (mac: boolean): Combo[] => [
   // bold, italic, underline; alignment left, center, right, justify; font dialog, hyperlink
   ...letters('b', 'i', 'u', 'l', 'e', 'r', 'j', 'd', 'k'),
+  // File › Open: App.tsx opens on Mod+o with any Shift or Alt
+  { mod: 'any', key: 'o' },
   // paragraph dialog ⌥⌘M
   { mod: 'any', alt: true, code: 'KeyM' },
   // line spacing ⌘1 / ⌘2 / ⌘5; one-point font nudge ⌘] / ⌘[

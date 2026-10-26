@@ -30,6 +30,8 @@ describe('blockedInReview', () => {
       letter('e', { ...ctrl, shiftKey: true }), letter('a', { ...ctrl, altKey: true }), letter('f', { ...ctrl, altKey: true }),
       letter('d', { ...ctrl, altKey: true }), letter('d', { altKey: true, shiftKey: true }), letter('t', { altKey: true, shiftKey: true }),
       keys({ key: 'F7', code: 'F7' }),
+      // File › Open: another file would replace the reviewed document
+      letter('o', ctrl),
     ]
     expect(blocked.filter((event) => !blockedInReview(event, false))).toEqual([])
   })
@@ -51,6 +53,7 @@ describe('blockedInReview', () => {
 
   it('uses Command on the Mac and keeps its native Control navigation', () => {
     expect(blockedInReview(letter('b', cmd), true)).toBe(true)
+    expect(blockedInReview(letter('o', cmd), true)).toBe(true)
     // the endnote shortcut is ⌥⌘E on the Mac, Ctrl+Alt+D elsewhere
     expect(blockedInReview(letter('´', { ...cmd, altKey: true, code: 'KeyE' }), true)).toBe(true)
     expect(blockedInReview(letter('∂', { ...cmd, altKey: true, code: 'KeyD' }), true)).toBe(false)

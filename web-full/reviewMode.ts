@@ -3,10 +3,12 @@
 // formatting and document-tool shortcuts do nothing (reviewShortcuts.ts); the app's own context menu does
 // not open, so its Paste entries cannot bypass the plain-text rule (the browser's menu opens instead, and
 // its Paste is an ordinary paste event). host.css hides the ribbon, its tab row and the status bar under
-// html.vound-review.
+// html.vound-review. Edits and caret moves in marked blocks are reported to the host (fieldReporting.ts).
 import type { Editor } from '@tiptap/core'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
+import type { EditorToHost } from './embed-protocol'
+import { fieldReportingKey, fieldReportingPlugin } from './fieldReporting'
 import { clipboardText } from './pasteText'
 import { blockedInReview, isMacPlatform, keepsNativeAction } from './reviewShortcuts'
 
@@ -48,13 +50,18 @@ function blockShortcut(event: KeyboardEvent) {
 // The app opens its menu from a React contextmenu handler; stopping the event before it keeps the browser's.
 const keepAppMenuShut = (event: MouseEvent) => event.stopPropagation()
 
-/** Marks the page for host.css, registers the plugin once and blocks the shortcuts and the app's menu. */
-export function enterReviewMode(editor: Editor): void {
+/** ahead of every other plugin: their keymaps and paste handlers would act first otherwise */
+const first = (plugin: Plugin, plugins: Plugin[]) => [plugin, ...plugins]
+
+/** Marks the page for host.css, registers the plugins once, blocks the shortcuts and the app's menu, and
+ *  reports the reviewer's edits and caret moves in marked blocks through `post`. */
+export function enterReviewMode(editor: Editor, post: (msg: EditorToHost) => void): void {
   document.documentElement.classList.add('vound-review')
   // the same listener added twice is one listener
   window.addEventListener('keydown', blockShortcut, true)
   window.addEventListener('contextmenu', keepAppMenuShut, true)
-  if (!reviewModeKey.get(editor.state)) editor.registerPlugin(reviewModePlugin, (plugin, plugins) => [plugin, ...plugins])
+  if (!reviewModeKey.get(editor.state)) editor.registerPlugin(reviewModePlugin, first)
+  if (!fieldReportingKey.get(editor.state)) editor.registerPlugin(fieldReportingPlugin(post), first)
 }
 
 /** Back to the plain embedded editor, for a vound:open without review mode. */
@@ -63,4 +70,5 @@ export function leaveReviewMode(editor: Editor): void {
   window.removeEventListener('keydown', blockShortcut, true)
   window.removeEventListener('contextmenu', keepAppMenuShut, true)
   if (reviewModeKey.get(editor.state)) editor.unregisterPlugin(reviewModeKey)
+  if (fieldReportingKey.get(editor.state)) editor.unregisterPlugin(fieldReportingKey)
 }

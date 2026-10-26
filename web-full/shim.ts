@@ -6,12 +6,15 @@
 // window.desktop.fontMetrics as no installed-font index).
 // Markers: the app hands over its editor (vite.config.ts, hostEditorHandle); the shim registers the
 // markers plugin on it and routes vound:markers, vound:scrollTo and vound:focus to it.
-// Review mode: vound:open with mode 'review' puts the handed-over editor in review mode (reviewMode.ts);
-// an open without it leaves review mode.
+// Review mode: vound:open with mode 'review' puts the handed-over editor in review mode (reviewMode.ts),
+// which reports edits and caret moves in marked blocks; an open without it leaves review mode.
+// Field writes: vound:setFieldValue and vound:placeCaret act on the handed-over editor (fieldWrite.ts); every
+// setFieldValue is answered with vound:fieldValueResult.
 import type { Editor } from '@tiptap/core'
 import { isEmbedded, type EditorToHost, type SlotMarker } from './embed-protocol'
 import { acceptsHostMessage, readHostMessage } from './embedMessages'
 import { embeddedSave } from './embeddedSave'
+import { applyFieldValue, placeCaret } from './fieldWrite'
 import { markersKey, markersPlugin, scrollToMarker, sealMarkers, setCurrent, setMarkers, resetMarkers } from './markersPlugin'
 import { enterReviewMode, leaveReviewMode } from './reviewMode'
 type Handler = (...args: unknown[]) => void
@@ -23,10 +26,12 @@ let hostEditor: Editor | null = null
 let pendingMarkers: SlotMarker[] | null = null
 /** the mode of the last vound:open; applied when the app hands over its editor if the open came first */
 let reviewMode = false
-const applyMode = (editor: Editor) => (reviewMode ? enterReviewMode(editor) : leaveReviewMode(editor))
 const embedded = isEmbedded()
 // same-origin only: the host and the editor are served from one origin (embed-protocol.ts)
 const toHost = (msg: EditorToHost, transfer: Transferable[] = []) => { if (embedded) window.parent.postMessage(msg, window.location.origin, transfer) }
+const applyMode = (editor: Editor) => (reviewMode ? enterReviewMode(editor, toHost) : leaveReviewMode(editor))
+/** the answer to a field write that arrives before the app handed over its editor */
+const noEditor = { ok: false, reason: 'noBlock' } as const
 // the app reports its unsaved-changes state on every render (vite.config.ts, hostReportsDirty); the host hears changes only
 let lastDirty = false
 const hostDirty = (dirty: boolean) => { if (dirty === lastDirty) return; lastDirty = dirty; toHost({ type: 'vound:dirty', dirty }) }
@@ -153,6 +158,14 @@ export function installDesktopShim() {
           break
         case 'vound:focus':
           if (hostEditor) setCurrent(hostEditor.view, msg.id)
+          break
+        case 'vound:setFieldValue': {
+          const result = hostEditor ? applyFieldValue(hostEditor.view, msg) : noEditor
+          toHost({ type: 'vound:fieldValueResult', requestId: msg.requestId, ...result })
+          break
+        }
+        case 'vound:placeCaret':
+          if (hostEditor) placeCaret(hostEditor.view, msg.block)
           break
       }
     })

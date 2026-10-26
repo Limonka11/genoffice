@@ -33,16 +33,16 @@ is `embed-protocol.ts`:
 | host → editor | `{ type: 'vound:markers', markers: SlotMarker[] }` replace all slot markers (`{ id, paragraph, scope: 'paragraph' \| 'cell', tone, label, actions }`; `actions` ⊂ `accept`, `reject`, `fill`, `ask`, `restore`; without them a marker gets `label: id`, `actions: []`) |
 | host → editor | `{ type: 'vound:scrollTo', id }` scroll a marker to the middle of the view and make it current |
 | host → editor | `{ type: 'vound:focus', id: string \| null }` make a marker current without scrolling, or none |
-| host → editor | `{ type: 'vound:setFieldValue', requestId, block: BlockRef, previous, value }` replace a field's value in one block (`BlockRef = { paragraph, scope: 'paragraph' \| 'cell' }`, named like a marker); answered with `vound:fieldValueResult`. Parsed, not acted on yet |
-| host → editor | `{ type: 'vound:placeCaret', block: BlockRef }` put the caret at the end of the block's text. Parsed, not acted on yet |
+| host → editor | `{ type: 'vound:setFieldValue', requestId, block: BlockRef, previous, value }` replace a field's value in one block (`BlockRef = { paragraph, scope: 'paragraph' \| 'cell' }`, named like a marker); answered with `vound:fieldValueResult` (see Field writes) |
+| host → editor | `{ type: 'vound:placeCaret', block: BlockRef }` put the caret at the end of the block's text, focus the editor and scroll it into view |
 | editor → host | `{ type: 'vound:ready' }` after the editor subscribed to open requests |
 | editor → host | `{ type: 'vound:saved', name, bytes: ArrayBuffer }` on every save (⌘S, File › Save, the save command) |
 | editor → host | `{ type: 'vound:dirty', dirty: boolean }` when unsaved changes appear or a save clears them |
 | editor → host | `{ type: 'vound:error', message }` open or save failed |
 | editor → host | `{ type: 'vound:fieldAction', id, action }` a field chip's button was pressed (`id` is the slot id) |
-| editor → host | `{ type: 'vound:blockEdited', ids }` a user edit changed the text of a marked block; `ids` are its slot ids |
-| editor → host | `{ type: 'vound:caretBlock', ids, leftWith? }` the caret entered a marked block, or left one (`ids: []`, `leftWith: 'Tab' \| 'other'`) |
-| editor → host | `{ type: 'vound:fieldValueResult', requestId, ok, reason? }` the answer to `vound:setFieldValue` (`reason`: `absent`, `ambiguous`, `notEditable`, `noBlock`). Not sent yet |
+| editor → host | `{ type: 'vound:blockEdited', ids }` a user edit changed the text of a marked block; `ids` are its slot ids. Review mode only; host writes are not reported |
+| editor → host | `{ type: 'vound:caretBlock', ids, leftWith? }` the caret entered a marked block, or left one (`ids: []`, `leftWith: 'Tab' \| 'other'`). Review mode only |
+| editor → host | `{ type: 'vound:fieldValueResult', requestId, ok, reason? }` the answer to `vound:setFieldValue` (`reason`: `absent`, `ambiguous`, `notEditable`, `noBlock`) |
 
 Host and editor must share one origin. The editor accepts a message only when `event.origin` is its
 own origin and `event.source` is `window.parent` (`embedMessages.ts`), reads it structurally and drops
@@ -126,8 +126,40 @@ editor, header and footer, text boxes) and App.tsx's window handler, which acts 
 editor do not see it, the browser's own action stays.
 
 A review-mode open that arrives before the app handed over its editor takes effect at the hand-over.
-An open without `mode: 'review'` leaves review mode. The parser accepts `vound:setFieldValue` and
-`vound:placeCaret`; the editor does not act on them yet.
+An open without `mode: 'review'` leaves review mode. File › Open (⌘O) is blocked too: its file would
+replace the reviewed document.
+
+Review mode reports the reviewer's work in marked blocks (`fieldReporting.ts`). `vound:blockEdited`
+follows a transaction of theirs that changes a marked block (a paragraph or cell carrying a marker
+decoration), with the ids of every block it touched; host writes, document opens and changes kept out of
+the undo history (the app's TOC, pagination and formatting refreshes) are not reported, and neither is a
+paragraph added or removed between two marked blocks. `vound:caretBlock` follows the caret: the ids of
+the marked block it entered, or `ids: []` with `leftWith: 'other'` when it left one. Tab neither indents,
+inserts a tab nor moves to the next table cell; in a marked block it reports `ids: []` with
+`leftWith: 'Tab'`, the host's cue to move to the next field. Typing in a field passthrough paragraph (a
+legacy form field) reaches the document only when the editor commits the field edit (the caret leaves the
+field, or a save starts), so its `vound:blockEdited` comes then.
+
+## Field writes
+
+`vound:setFieldValue` (`fieldWrite.ts`) writes exactly or refuses. The block is the paragraph whose source
+index the `BlockRef` names, or the table cell around it; an index that names no node or several (a split
+paragraph) is `noBlock`. The block's visible text is a paragraph's text, a field passthrough paragraph's
+result text (`fieldDisplay.left`), and for a cell its paragraphs' texts joined with line feeds.
+
+- `previous` occurs exactly once: that occurrence is replaced by `value` (empty allowed). In a paragraph
+  it is a text replacement in the formatting of the replaced text; inline leaves (breaks, images) at its
+  edges stay. In a field passthrough it rewrites `left` and drops the stale formatted `runs`, as the
+  editor's own field editing does; the save writes it into the field's result.
+- `previous` is empty and the block is a cell with no text: `value` goes into its first paragraph.
+- Otherwise the document is untouched: `absent` (no occurrence, or an empty `previous` anywhere but an
+  empty cell), `ambiguous` (several, overlapping ones included), `notEditable` (the occurrence spans two
+  paragraphs of a cell, or lies in text the editor cannot edit, such as a table-of-contents line).
+
+Every write is one transaction with the meta `voundHostWrite` (`HOST_WRITE_META`), so it is undoable
+and marks the document dirty like typing, but is never reported as `vound:blockEdited`.
+`vound:placeCaret` puts a text caret at the end of a paragraph (a cell's last paragraph) or selects a field
+passthrough paragraph as a whole, then focuses the editor and scrolls the caret into view.
 
 ## Develop
 

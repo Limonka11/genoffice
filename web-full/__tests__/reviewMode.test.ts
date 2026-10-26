@@ -9,6 +9,7 @@ import Text from '@tiptap/extension-text'
 import Underline from '@tiptap/extension-underline'
 import { EditorState, TextSelection } from '@tiptap/pm/state'
 import { EditorView, type EditorProps } from '@tiptap/pm/view'
+import { fieldReportingKey } from '../fieldReporting'
 import { enterReviewMode, leaveReviewMode, reviewModeKey, reviewModePlugin } from '../reviewMode'
 import { doc, schema } from './markerSchema'
 
@@ -91,6 +92,8 @@ const markNames = (target: Editor) => {
   return [...names]
 }
 
+const post = vi.fn()
+
 describe('enterReviewMode', () => {
   // a stand-in for App.tsx's window keydown handler: it edits on ⌘E without looking at defaultPrevented
   let appShortcuts: ((e: KeyboardEvent) => void) | null = null
@@ -116,7 +119,7 @@ describe('enterReviewMode', () => {
     expect(appShortcuts).toHaveBeenCalledTimes(3)
     const before = ed.state.doc
 
-    enterReviewMode(ed)
+    enterReviewMode(ed, post)
     for (const key of ['b', 'i', 'u', 'e', 'l', 'r', 'j']) press(ed, key)
     expect(ed.state.doc.eq(before)).toBe(true)
     expect(appShortcuts).toHaveBeenCalledTimes(3)
@@ -136,7 +139,7 @@ describe('enterReviewMode', () => {
       ed.view.dom.dispatchEvent(event)
       return event
     }
-    enterReviewMode(ed)
+    enterReviewMode(ed, post)
     const event = rightClick()
     expect(appMenu).not.toHaveBeenCalled()
     expect(event.defaultPrevented).toBe(false)
@@ -148,14 +151,20 @@ describe('enterReviewMode', () => {
 
   it('marks the page, registers the plugin once, and leaves again', () => {
     const ed = tiptap()
-    enterReviewMode(ed)
-    enterReviewMode(ed)
+    enterReviewMode(ed, post)
+    enterReviewMode(ed, post)
     expect(document.documentElement.classList.contains('vound-review')).toBe(true)
     expect(ed.state.plugins.filter((p) => p === reviewModePlugin)).toHaveLength(1)
+    expect(ed.state.plugins.filter((p) => p.spec.key === fieldReportingKey)).toHaveLength(1)
+    // Tab is the reviewer's "next field" in review mode: no indent, no tab character
+    const tab = new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', bubbles: true, cancelable: true })
+    ed.view.dom.dispatchEvent(tab)
+    expect(tab.defaultPrevented).toBe(true)
 
     leaveReviewMode(ed)
     expect(document.documentElement.classList.contains('vound-review')).toBe(false)
     expect(reviewModeKey.get(ed.state)).toBeUndefined()
+    expect(fieldReportingKey.get(ed.state)).toBeUndefined()
     press(ed, 'b')
     expect(markNames(ed)).toEqual(['bold'])
   })

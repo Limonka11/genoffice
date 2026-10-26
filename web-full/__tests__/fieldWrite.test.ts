@@ -1,0 +1,161 @@
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { EditorState, NodeSelection, type Transaction } from '@tiptap/pm/state'
+import { EditorView } from '@tiptap/pm/view'
+import type { Node as PmNode } from '@tiptap/pm/model'
+import type { BlockRef } from '../embed-protocol'
+import { applyFieldValue, HOST_WRITE_META, placeCaret } from '../fieldWrite'
+import { cell, doc, fieldPara, para, schema, table } from './markerSchema'
+
+let view: EditorView | null = null
+afterEach(() => { view?.destroy(); view = null })
+
+function viewOf(...blocks: PmNode[]) {
+  view = new EditorView(document.createElement('div'), { state: EditorState.create({ schema, doc: doc(...blocks) }) })
+  return view
+}
+const paragraphBlock = (paragraph: number): BlockRef => ({ paragraph, scope: 'paragraph' })
+const cellBlock = (paragraph: number): BlockRef => ({ paragraph, scope: 'cell' })
+const write = (v: EditorView, block: BlockRef, previous: string, value: string) => applyFieldValue(v, { block, previous, value })
+const texts = (v: EditorView) => {
+  const out: string[] = []
+  v.state.doc.descendants((node) => {
+    if (node.isTextblock) out.push(node.textContent)
+    if (node.attrs.fieldDisplay) out.push(`[${node.attrs.fieldDisplay.left}]`)
+    return !node.isTextblock
+  })
+  return out
+}
+const arial = schema.marks.docTextStyle.create({ font: 'Arial' })
+const bold = schema.marks.docTextStyle.create({ bold: true })
+
+describe('applyFieldValue', () => {
+  it('replaces the single occurrence in a paragraph', () => {
+    const v = viewOf(para(0, 'Name:'), para(1, 'Firma: Muster GmbH'))
+    expect(write(v, paragraphBlock(1), 'Muster GmbH', 'Beispiel AG')).toEqual({ ok: true })
+    expect(texts(v)).toEqual(['Name:', 'Firma: Beispiel AG'])
+  })
+
+  it('maps text offsets over runs and inline leaves, keeping the formatting at the replaced text', () => {
+    const runs = [schema.text('Ort: ', [bold]), schema.text('Ber', [arial]), schema.text('lin', [arial]), schema.nodes.docBreak.create(), schema.text('Mitte')]
+    const v = viewOf(schema.nodes.docParagraph.create({ docxPara: 0 }, runs))
+    expect(write(v, paragraphBlock(0), 'Berlin', 'Köln')).toEqual({ ok: true })
+    const paragraph = v.state.doc.child(0)
+    expect(paragraph.textContent).toBe('Ort: KölnMitte')
+    expect(paragraph.childCount).toBe(4)
+    expect(paragraph.child(1).marks).toEqual([arial])
+    expect(paragraph.child(2).type.name).toBe('docBreak')
+  })
+
+  it("replaces inside a field passthrough paragraph's left text and keeps other attrs", () => {
+    const v = viewOf(para(0, 'Name:'), fieldPara(1, 'Muster Ingenieure GmbH', { runs: [{ text: 'Muster Ingenieure GmbH' }] }))
+    expect(write(v, paragraphBlock(1), 'Muster Ingenieure GmbH', '')).toEqual({ ok: true })
+    const field = v.state.doc.child(1)
+    expect(field.attrs.docxPara).toBe(1)
+    expect(field.attrs.styleId).toBe('Formular')
+    // the formatted runs describe the old text; the editor's own field commit drops them the same way
+    expect(field.attrs.fieldDisplay).toEqual({ kind: 'text', left: '', fontFamily: 'Arial' })
+  })
+
+  it('refuses when previous occurs twice', () => {
+    const v = viewOf(para(0, 'ja / ja'))
+    expect(write(v, paragraphBlock(0), 'ja', 'nein')).toEqual({ ok: false, reason: 'ambiguous' })
+    expect(texts(v)).toEqual(['ja / ja'])
+  })
+
+  it('counts overlapping occurrences as several', () => {
+    const v = viewOf(para(0, 'aaa'))
+    expect(write(v, paragraphBlock(0), 'aa', 'b')).toEqual({ ok: false, reason: 'ambiguous' })
+  })
+
+  it('refuses when previous is absent', () => {
+    const v = viewOf(para(0, 'Name: Muster'))
+    expect(write(v, paragraphBlock(0), 'Beispiel', 'X')).toEqual({ ok: false, reason: 'absent' })
+  })
+
+  it('inserts into an empty cell when previous is empty', () => {
+    const v = viewOf(table(cell(para(0, 'USt-IdNr.:')), cell(para(1), para(2))))
+    expect(write(v, cellBlock(2), '', 'DE123456789')).toEqual({ ok: true })
+    expect(texts(v)).toEqual(['USt-IdNr.:', 'DE123456789', ''])
+  })
+
+  it('replaces text in the paragraph of a cell that holds it', () => {
+    const v = viewOf(table(cell(para(0, 'Telefon')), cell(para(1, 'Zentrale'), para(2, '089 123'))))
+    expect(write(v, cellBlock(1), '089 123', '089 456')).toEqual({ ok: true })
+    expect(texts(v)).toEqual(['Telefon', 'Zentrale', '089 456'])
+  })
+
+  it('refuses a match that spans two paragraphs of a cell', () => {
+    const v = viewOf(table(cell(para(0, 'Muster'), para(1, 'GmbH'))))
+    expect(write(v, cellBlock(0), 'Muster\nGmbH', 'X')).toEqual({ ok: false, reason: 'notEditable' })
+  })
+
+  it('refuses an empty previous in a non-empty paragraph', () => {
+    const v = viewOf(para(0, 'Name:'), para(1))
+    expect(write(v, paragraphBlock(0), '', 'X')).toEqual({ ok: false, reason: 'absent' })
+    // an empty paragraph is not an empty cell: the rule inserts only into cells
+    expect(write(v, paragraphBlock(1), '', 'X')).toEqual({ ok: false, reason: 'absent' })
+  })
+
+  it('refuses an index naming two nodes', () => {
+    const v = viewOf(para(3, 'Muster'), para(3, 'GmbH'))
+    expect(write(v, paragraphBlock(3), 'Muster', 'X')).toEqual({ ok: false, reason: 'noBlock' })
+    expect(write(v, paragraphBlock(9), 'Muster', 'X')).toEqual({ ok: false, reason: 'noBlock' })
+    // a cell scope outside any table
+    const plain = viewOf(para(0, 'Muster'))
+    expect(write(plain, cellBlock(0), 'Muster', 'X')).toEqual({ ok: false, reason: 'noBlock' })
+  })
+
+  it('refuses a block without editable text', () => {
+    const v = viewOf(schema.nodes.docProtected.create({ docxPara: 0, fieldDisplay: { kind: 'tocLine', left: 'Kapitel', right: '3' } }))
+    expect(write(v, paragraphBlock(0), 'Kapitel', 'X')).toEqual({ ok: false, reason: 'notEditable' })
+  })
+
+  it('marks the transaction as a host write', () => {
+    const v = viewOf(para(0, 'Name: Muster'))
+    const seen: Transaction[] = []
+    const dispatch = vi.fn((tr: Transaction) => { seen.push(tr); v.updateState(v.state.apply(tr)) })
+    v.setProps({ dispatchTransaction: dispatch })
+    write(v, paragraphBlock(0), 'Muster', 'Beispiel')
+    expect(seen).toHaveLength(1)
+    expect(seen[0].getMeta(HOST_WRITE_META)).toBe(true)
+  })
+
+  it('a two-field paragraph keeps the other field\'s text', () => {
+    const v = viewOf(para(0, 'Ort: Berlin Datum: 01.10.2026'), fieldPara(1, 'Ort: München Datum: 02.10.2026'))
+    expect(write(v, paragraphBlock(0), 'Berlin', '')).toEqual({ ok: true })
+    expect(write(v, paragraphBlock(1), '02.10.2026', '03.10.2026')).toEqual({ ok: true })
+    expect(texts(v)).toEqual(['Ort:  Datum: 01.10.2026', '[Ort: München Datum: 03.10.2026]'])
+  })
+
+  it('deleting a whole paragraph text keeps the paragraph', () => {
+    const v = viewOf(para(0, 'Muster'), para(1, 'Rest'))
+    expect(write(v, paragraphBlock(0), 'Muster', '')).toEqual({ ok: true })
+    expect(v.state.doc.childCount).toBe(2)
+    expect(v.state.doc.child(0).attrs.docxPara).toBe(0)
+    expect(texts(v)).toEqual(['', 'Rest'])
+  })
+})
+
+describe('placeCaret', () => {
+  it('puts the caret at the end of a paragraph, selects a field passthrough, and ends in a cell\'s last paragraph', () => {
+    const v = viewOf(para(0, 'Name: Muster'), fieldPara(1, 'Firma'), table(cell(para(2, 'a'), para(3, 'bc'))))
+    v.focus = vi.fn()
+
+    expect(placeCaret(v, paragraphBlock(0))).toBe(true)
+    expect(v.state.selection.empty).toBe(true)
+    expect(v.state.selection.from).toBe(1 + 'Name: Muster'.length)
+    expect(v.focus).toHaveBeenCalled()
+
+    expect(placeCaret(v, paragraphBlock(1))).toBe(true)
+    expect(v.state.selection).toBeInstanceOf(NodeSelection)
+    expect(v.state.selection.from).toBe(v.state.doc.child(0).nodeSize)
+
+    expect(placeCaret(v, cellBlock(2))).toBe(true)
+    const $caret = v.state.selection.$from
+    expect($caret.parent.attrs.docxPara).toBe(3)
+    expect($caret.parentOffset).toBe(2)
+
+    expect(placeCaret(v, paragraphBlock(7))).toBe(false)
+  })
+})
