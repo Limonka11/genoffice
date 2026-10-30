@@ -5,6 +5,9 @@ on:
     branches: [vound]
     # apps/** too: most of the bundle is apps/docs/src/renderer, and a renderer-only commit must still publish
     paths: ['web-full/**', 'apps/**', 'packages/**', 'package.json', 'package-lock.json', '.github/workflows/web-host.yml']
+  pull_request:
+    branches: [vound]
+    paths: ['web-full/**', 'apps/**', 'packages/**', 'package.json', 'package-lock.json', '.github/workflows/web-host.yml']
   workflow_dispatch:
 
 # The repository's default token is read-only; creating the release needs write.
@@ -54,3 +57,24 @@ jobs:
         run: |
           gh release view "web-host-$SHORT" >/dev/null 2>&1 && { echo "release web-host-$SHORT exists, leaving it as it is"; exit 0; }
           gh release create "web-host-$SHORT" "$ASSET" --target "$GITHUB_SHA" --title "web-host $SHORT" --notes "Static GenOffice Docs host built from $GITHUB_SHA, packed as the npm package @vound/genoffice-web-host. Serve it under the app's /editor/$SHORT/ path."
+
+  # Linux like the PDF service; on macOS the test documents' fonts can trigger system font-download prompts
+  verify-render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci --ignore-scripts
+      - run: npm run build:web-host
+      - run: npx playwright install --with-deps chromium
+      - name: Print every test DOCX through render.html and check page count and sizes
+        run: node web-full/verify-render.mjs
+        env: { RENDER_OUT: render-pdfs }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: render-pdfs
+          path: render-pdfs

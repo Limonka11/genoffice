@@ -250,6 +250,42 @@ spaces) and an empty result's placeholder are selected instead, in a paragraph a
 so typing replaces them. Writing five en spaces (Word's empty result) is an ordinary replace, and the en
 spaces are then the `previous` of the next write.
 
+## Render (headless PDF)
+
+`render.html` prints a DOCX with the editor's own layout, for a headless Chromium driver. It boots the same
+app as `index.html` (same shim and transforms, no host panel), opens the document through the app's boot
+open, opens the page preview and prints its sheets: the app's print CSS hides all editor chrome and prints
+each `.pv-page` as one sheet, and the page names each sheet's paper size with a named `@page` rule, so mixed
+paper prints in one job. The contract is `render-protocol.ts`.
+
+```js
+const result = await window.genofficeRender.load(bytes, { name: 'form.docx', timeoutMs: 120000 })
+// bytes: ArrayBuffer, or base64 string from a CDP driver
+// { status: 'ready', pageCount, pages: [{ widthPt, heightPt, orientation }] }
+// { status: 'failed', code, message }
+await page.pdf({ preferCSSPageSize: true, printBackground: true })   // only after 'ready'
+```
+
+`load` resolves `ready` once the document opened, phased content landed, pagination produced the same page
+count three polls in a row, the preview shows one sheet per page, every picture in it decoded and the font
+loads settled. `pageCount` is the editor's own page count; `pages` the size of each. It never rejects and
+never hangs: a typed failure resolves instead, `parse_failed` (corrupt, unsupported or password-protected
+file), `layout_timeout` (the deadline passed; the message names the stage), `font_load_failed` (a bundled
+`url()` face failed; `local()` faces are the editor's fallback chain and may be absent),
+`image_load_failed`, `already_loaded` (one document per page load) or `unexpected_error`. Print at device
+scale factor 1.
+
+`verify-render.mjs` prints every DOCX in the repo (or the files and folders it is given) through
+`dist/render.html` and checks the PDF's page count and per-page size against `ready`:
+
+```sh
+npm run build:web-host && node web-full/verify-render.mjs [file-or-dir ...]
+```
+
+Run it on Linux: the `verify-render` job of `web-host.yml` does on every pull request into `vound` and keeps
+the PDFs as the `render-pdfs` artifact. On macOS the test documents' fonts can make the system offer font
+downloads in a dialog.
+
 ## Develop
 
 ```sh
