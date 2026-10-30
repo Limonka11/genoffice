@@ -11,12 +11,15 @@
 // review mode. A save in review mode does not seal the markers (markersPlugin.ts, markersOnSave).
 // Field writes: vound:setFieldValue and vound:placeCaret act on the handed-over editor (fieldWrite.ts); every
 // setFieldValue is answered with vound:fieldValueResult.
+// Language: an embedding host picks the UI language with ?lang= (embedLocale.ts); stand-alone stays English.
 // Zoom: the app's width fit asks reviewFitWidth and reviewFitZoom (the reviewFitZoom transform in
 // vite.config.ts); in review mode they keep the field chip's gutter free and cap the fit at 100 %.
 import type { Editor } from '@tiptap/core'
+import { htmlLang } from '@genoffice/i18n'
 import { isEmbedded, type EditorToHost, type SlotMarker } from './embed-protocol'
 import { acceptsHostMessage, readHostMessage } from './embedMessages'
 import { embeddedSave } from './embeddedSave'
+import { embedLang } from './embedLocale'
 import { applyFieldValue, placeCaret } from './fieldWrite'
 import { markersKey, markersOnSave, markersPlugin, scrollToMarker, setCurrent, setMarkers, resetMarkers } from './markersPlugin'
 import { enterReviewMode, leaveReviewMode } from './reviewMode'
@@ -41,6 +44,7 @@ let lastDirty = false
 const hostDirty = (dirty: boolean) => { if (dirty === lastDirty) return; lastDirty = dirty; toHost({ type: 'vound:dirty', dirty }) }
 const params = new URLSearchParams(location.search)
 const docName = params.get('doc')
+const uiLang = embedLang(location.search, embedded)
 const lastSave: { name: string; bytes: Uint8Array | null; url: string | null } = { name: '', bytes: null, url: null }
 async function devFontMetrics(family: string) {
   const res = await fetch(`/__font-metrics?family=${encodeURIComponent(family)}`)
@@ -82,10 +86,10 @@ function handOverEditor(editor: Editor) {
   applyMode(editor)
 }
 const known: Record<string, unknown> = {
-  getLanguage: async () => 'en',
+  getLanguage: async () => uiLang,
   getTheme: async () => 'light',
   getDocumentTheme: async () => 'follow',
-  getSystemLocale: async () => 'en-US',
+  getSystemLocale: async () => htmlLang(uiLang),
   getAuthorName: async () => 'Reviewer',
   getAiPanelPrefs: async () => ({}),
   getAiSettings: async () => ({}),

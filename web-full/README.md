@@ -24,7 +24,9 @@ npm run build:web-host         # -> web-full/dist (static, relative asset paths,
 ## Embed
 
 Serve `web-full/dist` under any path of the host's own origin and put it in an iframe. The contract
-is `embed-protocol.ts`:
+is `embed-protocol.ts`. `index.html?lang=de` picks the UI language (`normalizeLang` of
+`@genoffice/i18n`: `de`, `en`, `fr` and the other supported languages; an unsupported value such as `bg`,
+or none, means English); the stand-alone page stays English.
 
 | direction | message |
 |---|---|
@@ -105,16 +107,17 @@ everything; the markers come back with the next `vound:markers` or `vound:open`.
 decorations only; nothing of them is written into a saved file.
 
 Embedded, `boot.ts` sets `html.vound-embedded` and `host.css` hides the Genspark AI dock, the ribbon's
-AI commands (the Genspark AI group, Editor, Translate, AI Resolve Comments, AI Revision Summary) and the
-AutoSave toggle; the page area takes the full width.
+AI commands (the Genspark AI group, Editor, Translate, AI Resolve Comments, AI Revision Summary), the
+floating "Ask AI" button on a selection and the AutoSave toggle; the page area takes the full width. The
+editor's success toast ("Saved", which only means the bytes went to the host) is hidden too, since the
+host reports the real outcome; error toasts still show.
 
 ## Review mode
 
 `vound:open` with `mode: 'review'` opens the document in review mode (`reviewMode.ts`): the host shows
 its own bar, and the editor works like a text field. `host.css` hides the ribbon, its tab row, the
 status bar and the paste-options chip under `html.vound-review`, and pads the top of the page scroll
-container (`.editor-scroll`) by `--vound-review-top` (52px) for the host's bar. The editor's success toasts,
-such as "Saved", are hidden too (the host's bar shows the save status); error toasts still show. Typing, deleting, keyboard
+container (`.editor-scroll`) by `--vound-review-top` (52px) for the host's bar. Typing, deleting, keyboard
 undo/redo, clipboard shortcuts, select-all, save, find, zoom and keyboard selection work as usual.
 
 Paste inserts the clipboard's plain text in the formatting of the insertion point (`pasteText.ts`):
@@ -150,6 +153,12 @@ skeleton check of the saved bytes catches it. `vound:caretBlock` follows the car
 block it entered, or `ids: []` with `leftWith: 'other'` when it left one. Tab neither indents, inserts a
 tab nor moves to the next table cell; in a marked block it reports `ids: []` with `leftWith: 'Tab'`, the
 host's cue to move to the next field. Shift+Tab does nothing.
+
+With the caret in a marked block, Mod-Enter posts `vound:fieldAction` with `accept` and Mod-Shift-Backspace
+with `reject` (`fieldActionKeys.ts`; Mod is ⌘ on the Mac, Ctrl elsewhere), like the chip's buttons. A key
+acts only when the field offers that action: the host's current field if it is at the caret and offers it,
+else the only field at the caret that does. Otherwise the key keeps its normal meaning (Mod-Enter inserts
+a page break). Inside a legacy form field being edited the node view keeps the keys, as it does for typing.
 
 A field passthrough paragraph (a legacy form field outside a table) is typed into inside its node view, out
 of ProseMirror's reach: its text reaches the document when the editor commits the field (the caret leaves

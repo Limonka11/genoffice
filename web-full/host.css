@@ -19,6 +19,12 @@ html.vound-embedded .autosave-toggle { display: none !important; }
 html.vound-embedded .ribbon-group:has(.ai-entry):not(:has(.ribbon-group-items > :not(.ai-entry))) { display: none !important; }
 html.vound-embedded .ai-entry { display: none !important; }
 html.vound-embedded .rb-big:has(.ai-feature-icon) { display: none !important; }
+/* the floating "Ask AI" button on a text selection (AiAskPopover.tsx) and its popover */
+html.vound-embedded .ai-ask-trigger { display: none !important; }
+html.vound-embedded .ai-ask-pop { display: none !important; }
+/* the host reports the real save outcome: the editor's "Saved" toast (it only means the bytes went to the host)
+   stays hidden, error toasts show */
+html.vound-embedded .app-toast.success { display: none !important; }
 /* Slot markers from the host (markersPlugin.ts): one node decoration per marked paragraph or table cell,
    one tone class (markers.ts picks the tone that needs attention most when slots share a node). View only: decorations never reach the saved document. Fill at 28 % alpha (47), outline at 90 % (E6). */
 .vound-slot { background: #E9D5FF47; outline: 2px solid #E9D5FFE6; outline-offset: 1px; border-radius: 2px; }
@@ -38,8 +44,6 @@ html.vound-review .ribbon { display: none !important; }
 html.vound-review .ribbon-tabs { display: none !important; }
 html.vound-review .status-bar { display: none !important; }
 html.vound-review .paste-chip { display: none !important; }
-/* the host's bar shows the save status: the editor's English "Saved" toast stays hidden, error toasts show */
-html.vound-review .app-toast.success { display: none !important; }
 @media screen { html.vound-review .editor-scroll { padding-top: var(--vound-review-top) !important; } }
 /* the page at the left of the canvas: all spare width lies right of it, for the field chip (reviewGutter.ts) */
 html.vound-review .doc-zoom { margin-left: 0; }

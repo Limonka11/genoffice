@@ -1,5 +1,7 @@
 /**
  * postMessage contract between a host page (the Vound app) and this iframe.
+ * URL:             index.html?lang=de                                          UI language (de, en, fr, …); unsupported
+ *                                                                              values (bg) and none mean English
  * Host → iframe:   { type: 'vound:open', name: string, bytes: ArrayBuffer, mode?: 'review' }   open a document;
  *                                                                               'review' opens it in review mode
  *                  { type: 'vound:command', command: 'save' }                 save now (same path as ⌘S)
@@ -13,7 +15,11 @@
  *                  { type: 'vound:saved', name: string, bytes: ArrayBuffer }   every save (⌘S, File › Save, 'save' command)
  *                  { type: 'vound:dirty', dirty: boolean }                     unsaved changes appeared or were saved; sent on change
  *                  { type: 'vound:error', message: string }                    open or save failed
- *                  { type: 'vound:fieldAction', id, action: FieldAction }      a chip button was pressed (id = slot id)
+ *                  { type: 'vound:fieldAction', id, action: FieldAction }      a chip button was pressed (id = slot id); in
+ *                                                                              review mode also Mod-Enter (accept) and
+ *                                                                              Mod-Shift-Backspace (reject) with the caret
+ *                                                                              in a field offering that action (Mod = ⌘
+ *                                                                              on the Mac, Ctrl elsewhere)
  *                  { type: 'vound:blockEdited', ids: string[] }                a user edit changed the text of a marked block
  *                  { type: 'vound:caretBlock', ids: string[], leftWith? }      the caret entered a marked block, or left
  *                                                                              one (ids [], leftWith 'Tab' | 'other')
