@@ -137,7 +137,12 @@ export default defineConfig({
   root: __dirname,
   // relative asset URLs so the built host can be served under any path (e.g. /editor/)
   base: './',
-  build: { outDir: resolve(__dirname, 'dist'), emptyOutDir: true, target: 'es2022' },
+  build: {
+    outDir: resolve(__dirname, 'dist'),
+    emptyOutDir: true,
+    target: 'es2022',
+    rollupOptions: { input: { index: resolve(__dirname, 'index.html'), render: resolve(__dirname, 'render.html') } },
+  },
   plugins: [react(), hostEndpoints(), hostDecidesEditability(), hostReportsDirty(), hostEditorHandle(), reviewFitZoom(), headerStripFont()],
   resolve: {
     alias: {

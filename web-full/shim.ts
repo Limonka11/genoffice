@@ -51,7 +51,7 @@ async function devFontMetrics(family: string) {
   return res.ok ? res.json() : null
 }
 const sampleResult = (name: string) => ({ path: `/samples/${name}.docx`, name: `${name}.docx`, dataUrl: `/samples/${name}.docx`, hash: '' })
-const fileResult = (file: File) => ({ path: `/local/${file.name}`, name: file.name, dataUrl: URL.createObjectURL(file), hash: '' })
+export const fileResult = (file: File) => ({ path: `/local/${file.name}`, name: file.name, dataUrl: URL.createObjectURL(file), hash: '' })
 function pickFile(): Promise<File | null> {
   return new Promise((resolve) => {
     const input = document.createElement('input'); input.type = 'file'; input.accept = '.docx'
@@ -124,9 +124,9 @@ const known: Record<string, unknown> = {
   reviewFitWidth: (canvasWidth: number) => reviewFitWidth(canvasWidth, reviewMode),
   reviewFitZoom: (zoom: number) => reviewFitZoom(zoom, reviewMode),
 }
-export function installDesktopShim() {
+export function installDesktopShim(overrides: Record<string, unknown> = {}) {
   const w = window as unknown as Record<string, unknown>
-  w.desktop = new Proxy(known, {
+  w.desktop = new Proxy({ ...known, ...overrides }, {
     get(target, key) {
       if (typeof key !== 'string') return undefined
       if (key in target) return target[key]
