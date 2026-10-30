@@ -1,7 +1,8 @@
 // Review mode tells the host what the reviewer does in marked blocks: vound:blockEdited when an edit of
 // theirs changes a marked block's text, and vound:caretBlock when the caret enters a marked block or leaves
 // one. Tab is the reviewer's "next field": it neither indents nor inserts a tab, and when the caret is in a
-// marked block it reports leaving it with Tab. The host's own writes (fieldWrite.ts, HOST_WRITE_META) and
+// marked block it reports leaving it with Tab. Mod-Enter and Mod-Shift-Backspace accept and reject the field at
+// the caret (fieldActionKeys.ts). The host's own writes (fieldWrite.ts, HOST_WRITE_META) and
 // the app's bookkeeping transactions are not the reviewer's edits.
 //
 // A field passthrough (a legacy form field) is typed into inside its node view: those keys and the DOM caret
@@ -12,6 +13,7 @@ import { Plugin, PluginKey, type EditorState, type Transaction } from '@tiptap/p
 import { Mapping, type StepMap } from '@tiptap/pm/transform'
 import type { Decoration, EditorView } from '@tiptap/pm/view'
 import type { EditorToHost } from './embed-protocol'
+import { fieldActionKeys } from './fieldActionKeys'
 import { HOST_WRITE_META } from './fieldWrite'
 import { markersKey, replacedWholeDocument } from './markersPlugin'
 
@@ -106,6 +108,7 @@ export function fieldReportingPlugin(post: (msg: EditorToHost) => void) {
   let caretMayHaveMoved = false
   // while Tab commits a field, the caret is about to be reported as leaving it
   let leavingField = false
+  const actionKeys = fieldActionKeys(post, caretIds)
 
   const reportEdits = (trs: readonly Transaction[], oldState: EditorState, state: EditorState) => {
     const { before, after } = editedRanges(trs)
@@ -168,6 +171,7 @@ export function fieldReportingPlugin(post: (msg: EditorToHost) => void) {
     },
     props: {
       handleKeyDown: (view, event) => {
+        if (actionKeys(view, event)) return true
         if (!plainTab(event)) return false
         // Shift+Tab is no way back to the previous field: it does nothing
         if (!event.shiftKey) leaveByTab(caretIds(view))
